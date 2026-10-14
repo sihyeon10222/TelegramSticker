@@ -1,0 +1,4 @@
+# Optional platform binary packages are used directly. Do not run dependency lifecycle scripts.
+allowBuilds:
+  esbuild: false
+  workerd: false

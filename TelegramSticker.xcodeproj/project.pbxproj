@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		1C6F0855307803AA00577D61 /* StickerKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1C6F084E307803AA00577D61 /* StickerKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BA2000010000000000000001 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = BA2000010000000000000002 /* Lottie */; };
+		BA2000020000000000000001 /* StickerVP9 in Frameworks */ = {isa = PBXBuildFile; productRef = BA2000020000000000000002 /* StickerVP9 */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,12 +89,24 @@
 			path = StickerKeyboard;
 			sourceTree = "<group>";
 		};
+		BA1000010000000000000001 /* StickerSamples */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = StickerSamples;
+			sourceTree = "<group>";
+		};
+		BA1000010000000000000002 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		1C6F081F3078037500577D61 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				BA2000010000000000000001 /* Lottie in Frameworks */,
+				BA2000020000000000000001 /* StickerVP9 in Frameworks */,
 			);
 		};
 		1C6F082C3078037600577D61 /* Frameworks */ = {
@@ -120,6 +134,8 @@
 				1C6F08323078037600577D61 /* TelegramStickerTests */,
 				1C6F083C3078037600577D61 /* TelegramStickerUITests */,
 				1C6F084F307803AA00577D61 /* StickerKeyboard */,
+				BA1000010000000000000001 /* StickerSamples */,
+				BA1000010000000000000002 /* Shared */,
 				1C6F08233078037500577D61 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -154,8 +170,14 @@
 			);
 			fileSystemSynchronizedGroups = (
 				1C6F08243078037500577D61 /* TelegramSticker */,
+				BA1000010000000000000001 /* StickerSamples */,
+				BA1000010000000000000002 /* Shared */,
 			);
 			name = TelegramSticker;
+			packageProductDependencies = (
+				BA2000010000000000000002 /* Lottie */,
+				BA2000020000000000000002 /* StickerVP9 */,
+			);
 			productName = TelegramSticker;
 			productReference = 1C6F08223078037500577D61 /* TelegramSticker.app */;
 			productType = "com.apple.product-type.application";
@@ -214,6 +236,8 @@
 			);
 			fileSystemSynchronizedGroups = (
 				1C6F084F307803AA00577D61 /* StickerKeyboard */,
+				BA1000010000000000000001 /* StickerSamples */,
+				BA1000010000000000000002 /* Shared */,
 			);
 			name = StickerKeyboard;
 			productName = StickerKeyboard;
@@ -255,6 +279,10 @@
 			);
 			mainGroup = 1C6F08193078037500577D61;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				BA2000010000000000000003 /* XCRemoteSwiftPackageReference "lottie-ios" */,
+				BA2000020000000000000003 /* XCLocalSwiftPackageReference "Packages/StickerVP9" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1C6F08233078037500577D61 /* Products */;
 			projectDirPath = "";
@@ -459,11 +487,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Configuration/TelegramSticker.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RKQCX265PQ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Configuration/App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = StickerBridge;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -491,11 +522,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Configuration/TelegramSticker.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RKQCX265PQ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Configuration/App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = StickerBridge;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -605,12 +639,13 @@
 		1C6F0858307803AA00577D61 /* Debug configuration for PBXNativeTarget "StickerKeyboard" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/StickerKeyboard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RKQCX265PQ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = StickerKeyboard/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = StickerKeyboard;
+				INFOPLIST_KEY_CFBundleDisplayName = StickerBridge;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -633,12 +668,13 @@
 		1C6F0859307803AA00577D61 /* Release configuration for PBXNativeTarget "StickerKeyboard" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/StickerKeyboard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RKQCX265PQ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = StickerKeyboard/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = StickerKeyboard;
+				INFOPLIST_KEY_CFBundleDisplayName = StickerBridge;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -702,6 +738,36 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		BA2000020000000000000003 /* XCLocalSwiftPackageReference "Packages/StickerVP9" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/StickerVP9;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		BA2000010000000000000003 /* XCRemoteSwiftPackageReference "lottie-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/airbnb/lottie-ios.git";
+			requirement = {
+				kind = exactVersion;
+				version = 4.6.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BA2000010000000000000002 /* Lottie */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BA2000010000000000000003 /* XCRemoteSwiftPackageReference "lottie-ios" */;
+			productName = Lottie;
+		};
+		BA2000020000000000000002 /* StickerVP9 */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = StickerVP9;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1C6F081A3078037500577D61 /* Project object */;
 	validationLevel = 1;

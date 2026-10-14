@@ -1,0 +1,19 @@
+{
+  "name": "stickerbridge-worker",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "check:bundle": "wrangler deploy --dry-run --outdir /tmp/stickerbridge-worker-bundle"
+  },
+  "devDependencies": {
+    "miniflare": "5.20261006.1-alpha",
+    "typescript": "7.0.2",
+    "wrangler": "4.149.0"
+  }
+}

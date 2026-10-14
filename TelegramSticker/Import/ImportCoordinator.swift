@@ -1,0 +1,268 @@
+import Foundation
+import CryptoKit
+
+nonisolated struct BatchImportDraft: Codable, Sendable {
+    let origin: URL
+    let links: [String]
+    var updating = false
+}
+nonisolated struct ImportDraft: Codable, Sendable {
+    let origin: URL
+    let link: String
+    let pack: RemotePack
+}
+nonisolated struct DownloadOutcome: Sendable {
+    let sticker: RemoteSticker
+    let file: URL?
+    var animation: URL? = nil
+    let bytes: Int
+    var failure: ImportFailure? = nil
+    var quality: String? = nil
+}
+nonisolated struct ImportResult: Sendable {
+    let installed: Int
+    let total: Int
+    let failed: Int
+    var message: String {
+        failed == 0 ? "\(installed)개를 설치했어요. 키보드에서 팩을 선택해 보세요." :
+            "\(total)개 중 \(installed)개를 설치했어요. 실패한 \(failed)개는 다시 시도할 수 있어요."
+    }
+}
+
+actor ImportCoordinator {
+    private let writer: LibraryWriter
+    private let converter = StaticImageConverter()
+    private static let conversionGate = RequestGate(limit: 1)
+    private let root: URL
+    init(writer: LibraryWriter, root: URL? = nil) {
+        self.writer = writer
+        self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ImportJobs", isDirectory: true)
+    }
+    func saveBatch(_ draft: BatchImportDraft) throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("batch-draft.json")
+        if draft.links.isEmpty { try? FileManager.default.removeItem(at: file); return }
+        let data = try JSONEncoder().encode(draft)
+        guard data.count <= 256 * 1024 else { throw StickerImportError.tooLarge }
+        try data.write(to: file, options: .atomic)
+    }
+    func batchDraft(for origin: URL) throws -> BatchImportDraft? {
+        let file = root.appendingPathComponent("batch-draft.json")
+        guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: 256 * 1024 + 1) ?? Data()
+        guard data.count <= 256 * 1024 else { return nil }
+        let draft = try JSONDecoder().decode(BatchImportDraft.self, from: data)
+        return draft.origin == origin ? draft : nil
+    }
+
+    func saveDraft(_ draft: ImportDraft) throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try JSONEncoder().encode(draft).write(to: root.appendingPathComponent("draft.json"), options: .atomic)
+    }
+    func draft(for origin: URL) throws -> ImportDraft? {
+        let path = root.appendingPathComponent("draft.json")
+        guard FileManager.default.fileExists(atPath: path.path) else { return nil }
+        let handle = try FileHandle(forReadingFrom: path)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: 2 * 1024 * 1024 + 1) ?? Data()
+        guard data.count <= 2 * 1024 * 1024 else { return nil }
+        let draft = try JSONDecoder().decode(ImportDraft.self, from: data)
+        guard draft.origin == origin else { return nil }
+        try draft.pack.validate(requestedName: StickerLink.parse(draft.link))
+        return draft
+    }
+    func installedResult(for pack: RemotePack) async throws -> ImportResult? {
+        guard let installed = try await writer.pack(id: "telegram-" + pack.name) else { return nil }
+        return ImportResult(installed: installed.stickers.count, total: installed.originalCount,
+                            failed: installed.pendingStickerIDs?.count ?? 0)
+    }
+
+    /// One lease protects the batch from cache clearing and other imports. Each
+    /// pack gets its own child cache so its cleanup cannot delete a sibling's files.
+    func beginBatch(links: [String], origin: URL, updating: Bool) async throws -> URL {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let data = try encoder.encode(BatchImportDraft(origin: origin, links: links, updating: updating))
+        let key = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        return try await ImportJobCache.shared.begin(root: root, key: key)
+    }
+
+    func batchWorker(directory: URL, name: String) throws -> ImportCoordinator {
+        guard StickerLink.validName(name) else { throw StickerImportError.invalidLink }
+        return ImportCoordinator(writer: writer, root: directory.appendingPathComponent(name, isDirectory: true))
+    }
+
+    func endBatch(directory: URL, completed: Bool) async {
+        if completed { try? FileManager.default.removeItem(at: directory) }
+        await ImportJobCache.shared.end(root: root)
+    }
+
+    @discardableResult
+    func install(_ pack: RemotePack, client: WorkerClient,
+                 updating: Bool = false, onlyIDs: Set<String>? = nil,
+                 progress: @escaping @Sendable (ImportProgress) async -> Void) async throws -> ImportResult {
+        try pack.validate(requestedName: pack.name)
+        let existing = try await writer.pack(id: "telegram-" + pack.name)
+        if updating, existing == nil { throw LibraryError.invalidOrder }
+        if updating, pack.refreshed != true || pack.fetchedAt == nil { throw StickerImportError.refreshUnsupported }
+        if let existing, !updating, existing.pendingStickerIDs?.isEmpty != false { throw LibraryError.duplicatePack }
+        guard pack.stickerType == "regular", updating || !pack.installableStickers.isEmpty else { throw StickerImportError.noStaticStickers }
+        let oldByID = Dictionary(uniqueKeysWithValues: (existing?.stickers ?? []).map { ($0.id, $0) })
+        let reusable: Set<String>
+        if updating, let existing { reusable = try await writer.reusableStickerIDs(in: existing) } else { reusable = [] }
+        let requestedIDs = updating ? pack.installableStickers.filter { oldByID[$0.id]?.sourceFormat != $0.format || !reusable.contains($0.id) }.map(\.id)
+            : existing?.pendingStickerIDs ?? pack.installableStickers.map(\.id)
+        let requested = Set(requestedIDs)
+        let candidates = pack.installableStickers.filter { requested.contains($0.id) }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        var cachePack = pack; cachePack.fetchedAt = nil; cachePack.refreshed = nil
+        var signature = try encoder.encode(cachePack)
+        signature.append(contentsOf: client.configuration.origin.absoluteString.utf8)
+        if candidates.contains(where: { $0.format != "static" }) {
+            // Do not reuse GIFs produced before timing correction/frame sampling changes.
+            signature.append(contentsOf: "animation-pipeline-v3-file".utf8)
+        }
+        let key = SHA256.hash(data: signature).map { String(format: "%02x", $0) }.joined()
+        let directory = try await ImportJobCache.shared.begin(root: root, key: key)
+        let eligible = candidates.filter { onlyIDs == nil || onlyIDs!.contains($0.id) || FileManager.default.fileExists(atPath: directory.appendingPathComponent($0.id + ".png").path) }
+        do {
+            let result = try await downloadAndPublish(pack, existing: existing, requestedIDs: requestedIDs,
+                candidates: eligible, client: client, directory: directory, updating: updating, progress: progress)
+            await ImportJobCache.shared.end(root: root)
+            return result
+        } catch {
+            await ImportJobCache.shared.end(root: root)
+            throw error
+        }
+    }
+
+    private func downloadAndPublish(_ pack: RemotePack, existing: PackManifestV1?, requestedIDs: [String],
+                                    candidates: [RemoteSticker], client: WorkerClient,
+                                    directory: URL, updating: Bool,
+                                    progress: @escaping @Sendable (ImportProgress) async -> Void) async throws -> ImportResult {
+        let converter = self.converter
+        var finished: [String: DownloadOutcome] = [:]
+        let previousCount = existing?.stickers.count ?? 0
+        let total = updating ? pack.stickers.count : existing?.originalCount ?? pack.stickers.count
+        var failures = await ImportFailureStore.shared.load(name: pack.name)
+        failures.removeAll { !requestedIDs.contains($0.id) }
+        for id in requestedIDs where !pack.stickers.contains(where: { $0.id == id }) && !failures.contains(where: { $0.id == id }) {
+            failures.append(ImportFailure(id: id, format: "unknown", stage: "조회", code: "asset_unavailable", message: "원본 팩에서 항목을 찾을 수 없어요. 팩 업데이트로 목록을 다시 맞출 수 있어요.", retryable: false))
+        }
+        let candidateIDs = Set(candidates.map(\.id))
+        failures.removeAll { candidateIDs.contains($0.id) }
+        var failed = requestedIDs.count - candidates.count
+        await progress(ImportProgress(completed: previousCount, total: total, failed: failed))
+        try await withThrowingTaskGroup(of: DownloadOutcome.self) { group in
+            var next = 0
+            func add(_ sticker: RemoteSticker) {
+                group.addTask {
+                    try Task.checkCancellation()
+                    let output = directory.appendingPathComponent(sticker.id + ".png")
+                    let animation = directory.appendingPathComponent(sticker.id + ".gif")
+                    let animated = sticker.format != "static"
+                    var stage = "다운로드"
+                    do {
+                        if FileManager.default.fileExists(atPath: output.path),
+                           let data = try? Data(contentsOf: output, options: .mappedIfSafe), PNGValidation.isValid(data) {
+                            if !animated { return DownloadOutcome(sticker: sticker, file: output, bytes: data.count) }
+                            if let size = try? animation.resourceValues(forKeys: [.fileSizeKey]).fileSize, GIFValidation.isValid(url: animation) {
+                                return DownloadOutcome(sticker: sticker, file: output, animation: animation, bytes: data.count + size, quality: (try? String(contentsOf: directory.appendingPathComponent(sticker.id + ".quality"), encoding: .utf8)))
+                            }
+                        }
+                        let source = directory.appendingPathComponent(sticker.id + ".source")
+                        defer { try? FileManager.default.removeItem(at: source) }
+                        _ = try await client.assetFile(pack: pack.name, sticker: sticker, destination: source)
+                        // Download the next files while one animation is being converted.
+                        try await Self.conversionGate.acquire()
+                        defer { Task { await Self.conversionGate.release() } }
+                        try Task.checkCancellation()
+                        let original = try Data(contentsOf: source, options: .mappedIfSafe)
+                        try Task.checkCancellation()
+                        stage = "변환"
+                        let png: Data
+                        var qualityLabel: String?
+                        if animated {
+                            var converted: ConvertedAnimation?
+                            for (index, quality) in AnimationQuality.fallback.enumerated() {
+                                do {
+                                    if sticker.format == "animated" { converted = try await TGSConverter.convert(original, output: animation, quality: quality) }
+                                    else { converted = try await WebMConverter().convert(original, output: animation, quality: quality) }
+                                    if index > 0 { qualityLabel = quality.label }
+                                    break
+                                } catch {
+                                    let resourceFailure = isConversionTimeout(error) ||
+                                        [WebMConversionFailure.deadline, .image, .output].contains(error as? WebMConversionFailure ?? .bitstream)
+                                    guard resourceFailure, index < AnimationQuality.fallback.count - 1 else { throw error }
+                                }
+                            }
+                            guard let converted else { throw StickerImportError.unsupportedFormat }
+                            png = converted.poster
+                            qualityLabel = converted.quality ?? qualityLabel
+                        } else { png = try await converter.png(from: original) }
+                        try Task.checkCancellation()
+                        stage = "저장"
+                        try png.write(to: output, options: .atomic)
+                        if let qualityLabel { try qualityLabel.write(to: directory.appendingPathComponent(sticker.id + ".quality"), atomically: true, encoding: .utf8) }
+                        return DownloadOutcome(sticker: sticker, file: output, animation: animated ? animation : nil,
+                            bytes: png.count, quality: qualityLabel)
+                    } catch is CancellationError { throw CancellationError() }
+                    catch {
+                        if Task.isCancelled { throw CancellationError() }
+                        return DownloadOutcome(sticker: sticker, file: nil, bytes: 0, failure: .record(sticker: sticker, stage: stage, error: error))
+                    }
+                }
+            }
+            // Three downloads overlap; the shared conversion gate keeps expensive rendering serial.
+            let concurrency = 3
+            for _ in 0..<min(concurrency, candidates.count) { add(candidates[next]); next += 1 }
+            while let result = try await group.next() {
+                try Task.checkCancellation()
+                if let existing, try await !writer.hasRevision(id: existing.id, revision: existing.revision) {
+                    group.cancelAll(); throw LibraryError.invalidOrder
+                }
+                if result.file != nil { finished[result.sticker.id] = result } else { failed += 1 }
+                if let failure = result.failure { failures.append(failure) }
+                try await ImportFailureStore.shared.save(name: pack.name, failures: failures)
+                await progress(ImportProgress(completed: previousCount + finished.count, total: total, failed: failed))
+                if next < candidates.count { add(candidates[next]); next += 1 }
+            }
+        }
+        guard updating || previousCount + finished.count > 0 else { throw StickerImportError.partial(completed: 0, total: total) }
+        try Task.checkCancellation()
+        let pending = requestedIDs.filter { finished[$0] == nil }
+        try await ImportFailureStore.shared.save(name: pack.name, failures: failures)
+        if updating, !pending.isEmpty { throw StickerImportError.updateFailed }
+        if updating || !finished.isEmpty {
+            let oldInputs: [LocalStickerInput]
+            if let existing { oldInputs = try await writer.inputs(for: existing) }
+            else { oldInputs = [] }
+            var available = Dictionary(uniqueKeysWithValues: oldInputs.map { ($0.id, $0) })
+            for (index, sticker) in pack.stickers.enumerated() {
+                if let result = finished[sticker.id], let file = result.file {
+                    available[sticker.id] = LocalStickerInput(id: sticker.id, name: sticker.emoji ?? "스티커 \(index + 1)",
+                        url: file, sourceFormat: sticker.format, animationURL: result.animation, conversionQuality: result.quality)
+                }
+            }
+            // Keep the source order, preserving installed items removed from the remote pack.
+            let ordered = pack.stickers.compactMap { available.removeValue(forKey: $0.id) }
+            let retained = updating ? [] : oldInputs.filter { available[$0.id] != nil }
+            try await writer.install(id: "telegram-" + pack.name, title: pack.title, stickers: ordered + retained,
+                originalCount: total, telegramName: pack.name, pendingStickerIDs: pending, replacingRevision: existing?.revision, mirroringRemote: updating,
+                lastCheckedAt: updating ? pack.fetchedAt.map { Date(timeIntervalSince1970: $0) } : existing?.lastCheckedAt)
+        } else if let existing {
+            guard try await writer.pack(id: existing.id)?.revision == existing.revision else { throw LibraryError.invalidOrder }
+        }
+        if pending.isEmpty { try? FileManager.default.removeItem(at: directory) }
+        if pending.isEmpty { try? FileManager.default.removeItem(at: root.appendingPathComponent("draft.json")) }
+        return ImportResult(installed: updating ? pack.stickers.count : previousCount + finished.count, total: total, failed: pending.count)
+    }
+}
+
+nonisolated private func isConversionTimeout(_ error: Error) -> Bool {
+    if case StickerImportError.conversionTimeout = error { return true }; return false
+}

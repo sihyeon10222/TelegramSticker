@@ -1,0 +1,11 @@
+.DS_Store
+DerivedData/
+.build/
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+*.xcresult/
