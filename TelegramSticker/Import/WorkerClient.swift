@@ -58,7 +58,10 @@ actor WorkerClient {
         components.path = path
         components.queryItems = refresh ? [URLQueryItem(name: "refresh", value: "1")] : variant.map { [URLQueryItem(name: "variant", value: $0)] }
         guard let url = components.url else { throw StickerImportError.invalidConfiguration }
-        for attempt in 0..<6 {
+        // Asset retry ownership belongs to ImportCoordinator, covering download
+        // and conversion together. Avoid multiplying five retries at both levels.
+        let maximumRetries = path.contains("/assets/") ? 0 : 5
+        for attempt in 0...maximumRetries {
             try await requests.acquire()
             do {
                 try await DownloadRequestBudget.shared.wait(asset: path.contains("/assets/"))
@@ -72,17 +75,19 @@ actor WorkerClient {
                 var delay: Double?
                 if case let StickerImportError.server(code, retryable, retryAfter) = error {
                     description = "서버 \(code) · 재시도 가능 \(retryable)"
-                    if retryable, attempt < 5 {
+                    if retryable {
                         await DownloadRequestBudget.shared.backOff(seconds: retryAfter)
-                        delay = Double(max(1, retryAfter)) + Double.random(in: 0.2...1.5)
+                        if attempt < maximumRetries {
+                            delay = Double(max(1, retryAfter)) + Double.random(in: 0.2...1.5)
+                        }
                     }
                 } else if let network = error as? URLError {
                     description = "네트워크 \(network.code.rawValue)"
-                    if attempt < 5, [.timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet].contains(network.code) {
+                    if attempt < maximumRetries, [.timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet].contains(network.code) {
                         delay = min(30, pow(2, Double(attempt + 1))) + Double.random(in: 0.2...1.5)
                     }
                 } else { description = error.localizedDescription }
-                let action = delay.map { " · \(Int(ceil($0)))초 뒤 자동 재시도 (\(attempt + 1)/6)" } ?? " · 최종 실패"
+                let action = delay.map { " · \(Int(ceil($0)))초 뒤 자동 재시도 (\(attempt + 1)/5)" } ?? (maximumRetries == 0 ? " · 항목 재시도 처리로 전달" : (attempt == maximumRetries ? " · 5회 재시도 종료" : " · 재시도 불가"))
                 await DownloadDiagnostics.shared.record(path + " · " + description + action)
                 guard let delay else {
                     if error is URLError { throw StickerImportError.network }

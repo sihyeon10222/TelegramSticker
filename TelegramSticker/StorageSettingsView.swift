@@ -11,36 +11,41 @@ struct StorageSettingsView: View {
     var body: some View {
         LabeledContent("설치 데이터", value: ByteCountFormatter.string(fromByteCount: installed, countStyle: .file))
         LabeledContent("삭제 가능한 캐시", value: ByteCountFormatter.string(fromByteCount: disposable, countStyle: .file))
-        Button("스티커 용량 최적화") { optimization = true }
-            .disabled(clearing || (installed == 0 && OptimizationCenter.shared.current == nil))
-            .buttonStyle(.glass)
-            .accessibilityIdentifier("optimizeStorage")
-            .sheet(isPresented: $optimization) { OptimizationView(request: OptimizationRequest()) }
+        HStack(spacing: 12) {
+            Button("스티커 용량 최적화") { optimization = true }
+                .disabled(clearing || (installed == 0 && OptimizationCenter.shared.current == nil))
+                .accessibilityIdentifier("optimizeStorage")
+            Spacer(minLength: 0)
+            Button("캐시 삭제") {
+                clearing = true
+                Task {
+                    defer { clearing = false }
+                    do {
+                        guard let writer = LibraryWriter.shared else { throw LibraryError.unavailable }
+                        try await ImportJobCache.shared.clear(root: jobs, writer: writer)
+                        message = "캐시를 삭제했어요. 설치한 팩과 연결 설정은 유지했어요."
+                    } catch { message = error.localizedDescription }
+                    await refresh()
+                }
+            }
+            .disabled(busy || clearing || ImportActivity.shared.count > 0)
+            .accessibilityIdentifier("clearCache")
+        }
+        .buttonStyle(.glass)
+        .sheet(isPresented: $optimization) { OptimizationView(request: OptimizationRequest()) }
+        .task {
+            while !Task.isCancelled {
+                await refresh()
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            }
+        }
         if OptimizationCenter.shared.current != nil {
             Button("최근 최적화 다시 열기", systemImage: "arrow.up.forward.app") { OptimizationCenter.shared.presentCurrent() }
                 .buttonStyle(.glass)
         }
-        Button("캐시 삭제") {
-            clearing = true
-            Task {
-                defer { clearing = false }
-                do {
-                    guard let writer = LibraryWriter.shared else { throw LibraryError.unavailable }
-                    try await ImportJobCache.shared.clear(root: jobs, writer: writer)
-                    message = "캐시를 삭제했어요. 설치한 팩과 연결 설정은 유지했어요."
-                } catch { message = error.localizedDescription }
-                await refresh()
-            }
-        }.disabled(busy || clearing || ImportActivity.shared.count > 0).buttonStyle(.glass).accessibilityIdentifier("clearCache")
         if busy || ImportActivity.shared.count > 0 { Text("가져오기·업데이트 작업 중에는 삭제할 수 없어요.").font(.caption).foregroundStyle(.secondary) }
         if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
-        Text("설치된 GIF와 키보드 재생 파일은 오프라인 사용을 위해 보관해요.").font(.caption).foregroundStyle(.secondary)
-            .task {
-                while !Task.isCancelled {
-                    await refresh()
-                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
-                }
-            }
+
     }
     private func refresh() async {
         busy = await ImportJobCache.shared.isActive(root: jobs)

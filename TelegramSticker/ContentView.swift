@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var onboarding = false
     @Bindable private var imports = ImportActivity.shared
     @Bindable private var optimizations = OptimizationCenter.shared
+    @Bindable private var linkInbox = PackLinkInbox.shared
     var body: some View {
         TabView {
             Tab("내 스티커 팩", systemImage: "square.stack") { LibraryView() }
@@ -17,6 +18,11 @@ struct ContentView: View {
             ImportView(model: session)
         }
         .sheet(item: $optimizations.presented) { OptimizationView(model: $0) }
+        .sheet(item: $linkInbox.received) { ReceivedPackLinksView(received: $0) }
+        .onOpenURL { url in Task { await linkInbox.open(url) } }
+        .alert("링크 파일 가져오기", isPresented: Binding(get: { linkInbox.error != nil }, set: { if !$0 { linkInbox.error = nil } })) {
+            Button("확인", role: .cancel) { linkInbox.error = nil }
+        } message: { Text(linkInbox.error ?? "") }
         .sheet(isPresented: $onboarding) {
             OnboardingView {
                 hasCompletedOnboarding = true
@@ -80,8 +86,6 @@ private struct SettingsView: View {
                         Label("키보드 추가 및 전체 접근 안내", systemImage: "keyboard")
                     }
                     .accessibilityIdentifier("keyboardSetup")
-                    Label("복사한 뒤 채팅창에 직접 붙여넣으세요.", systemImage: "doc.on.clipboard")
-                        .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Section {
                     TextField("여기를 누른 뒤 지구본으로 전환", text: $practiceText)
@@ -90,28 +94,13 @@ private struct SettingsView: View {
                         .onSubmit { practiceFocused = false }
                         .accessibilityIdentifier("keyboardPractice")
                 } header: { Text("키보드 전환 연습") } footer: {
-                    Text("이 칸에 입력한 내용은 저장하지 않아요.")
+                    Text("복사한 뒤 채팅창에 직접 붙여넣으세요.")
                 }
                 Section("저장 공간") { StorageSettingsView() }
                 Section("진단") { NavigationLink("다운로드 로그") { DownloadLogsView() } }
-                Section("앱 정보") {
-                    NavigationLink("오픈 소스 라이선스") {
-                        ScrollView {
-                            Text((Bundle.main.url(forResource: "ThirdPartyNotices", withExtension: "txt")
-                                .flatMap { try? String(contentsOf: $0, encoding: .utf8) }) ?? "라이선스를 열 수 없어요.")
-                                .font(.footnote).textSelection(.enabled).padding()
-                        }.navigationTitle("오픈 소스 라이선스")
-                    }
-                }
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("설정")
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("완료") { practiceFocused = false }
-                }
-            }
             .onDisappear { practiceFocused = false }
         }
     }

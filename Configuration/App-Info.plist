@@ -1,7 +1,51 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-    <key>BGTaskSchedulerPermittedIdentifiers</key>
-    <array><string>com.sihyeon.TelegramSticker.work.*</string></array>
-    <key>UIBackgroundModes</key><array><string>processing</string></array>
-</dict></plist>
+<plist version="1.0">
+<dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.sihyeon.TelegramSticker.work.*</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>processing</string>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>StickerBridge Pack Links</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.sihyeon.TelegramSticker.pack-links</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.sihyeon.TelegramSticker.pack-links</string>
+			<key>UTTypeDescription</key>
+			<string>StickerBridge Pack Links</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>stickerlinks</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.stickerbridge.links</string>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

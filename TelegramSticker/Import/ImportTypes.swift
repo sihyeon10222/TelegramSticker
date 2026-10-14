@@ -100,4 +100,8 @@ nonisolated struct ImportProgress: Sendable {
     let completed: Int
     let total: Int
     let failed: Int
+    var installedCount: Int { min(max(0, total), max(0, completed)) }
+    var fraction: Double { total > 0 ? Double(installedCount) / Double(total) : 0 }
+    var percentage: Int { Int(fraction * 100) }
+    var displayText: String { "\(installedCount)/\(max(0, total)) (\(percentage)%) 실패 \(max(0, failed))" }
 }

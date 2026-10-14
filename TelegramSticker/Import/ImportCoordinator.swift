@@ -176,58 +176,66 @@ actor ImportCoordinator {
                     let output = directory.appendingPathComponent(sticker.id + ".png")
                     let animation = directory.appendingPathComponent(sticker.id + ".gif")
                     let animated = sticker.format != "static"
-                    var stage = "다운로드"
-                    do {
-                        if FileManager.default.fileExists(atPath: output.path),
-                           let data = try? Data(contentsOf: output, options: .mappedIfSafe), PNGValidation.isValid(data) {
-                            if !animated { return DownloadOutcome(sticker: sticker, file: output, bytes: data.count) }
-                            if let size = try? animation.resourceValues(forKeys: [.fileSizeKey]).fileSize, GIFValidation.isValid(url: animation) {
-                                return DownloadOutcome(sticker: sticker, file: output, animation: animation, bytes: data.count + size, quality: (try? String(contentsOf: directory.appendingPathComponent(sticker.id + ".quality"), encoding: .utf8)))
-                            }
-                        }
-                        let source = directory.appendingPathComponent(sticker.id + ".source")
-                        defer { try? FileManager.default.removeItem(at: source) }
-                        _ = try await client.assetFile(pack: pack.name, sticker: sticker, destination: source)
-                        // Download the next files while one animation is being converted.
-                        try await Self.conversionGate.acquire()
-                        defer { Task { await Self.conversionGate.release() } }
-                        try Task.checkCancellation()
-                        let original = try Data(contentsOf: source, options: .mappedIfSafe)
-                        try Task.checkCancellation()
-                        stage = "변환"
-                        let png: Data
-                        var qualityLabel: String?
-                        if animated {
-                            var converted: ConvertedAnimation?
-                            for (index, quality) in AnimationQuality.fallback.enumerated() {
-                                do {
-                                    if sticker.format == "animated" { converted = try await TGSConverter.convert(original, output: animation, quality: quality) }
-                                    else { converted = try await WebMConverter().convert(original, output: animation, quality: quality) }
-                                    if index > 0 { qualityLabel = quality.label }
-                                    break
-                                } catch {
-                                    let resourceFailure = isConversionTimeout(error) ||
-                                        [WebMConversionFailure.deadline, .image, .output].contains(error as? WebMConversionFailure ?? .bitstream)
-                                    guard resourceFailure, index < AnimationQuality.fallback.count - 1 else { throw error }
+                    // Initial download plus at most five complete re-downloads.
+                    for retryAttempt in 0...5 {
+                        var stage = "다운로드"
+                        do {
+                            if FileManager.default.fileExists(atPath: output.path),
+                               let data = try? Data(contentsOf: output, options: .mappedIfSafe), PNGValidation.isValid(data) {
+                                if !animated { return DownloadOutcome(sticker: sticker, file: output, bytes: data.count) }
+                                if let size = try? animation.resourceValues(forKeys: [.fileSizeKey]).fileSize, GIFValidation.isValid(url: animation) {
+                                    return DownloadOutcome(sticker: sticker, file: output, animation: animation, bytes: data.count + size, quality: (try? String(contentsOf: directory.appendingPathComponent(sticker.id + ".quality"), encoding: .utf8)))
                                 }
                             }
-                            guard let converted else { throw StickerImportError.unsupportedFormat }
-                            png = converted.poster
-                            qualityLabel = converted.quality ?? qualityLabel
-                        } else { png = try await converter.png(from: original) }
-                        try Task.checkCancellation()
-                        stage = "저장"
-                        try png.write(to: output, options: .atomic)
-                        if let qualityLabel { try qualityLabel.write(to: directory.appendingPathComponent(sticker.id + ".quality"), atomically: true, encoding: .utf8) }
-                        return DownloadOutcome(sticker: sticker, file: output, animation: animated ? animation : nil,
-                            bytes: png.count, quality: qualityLabel)
-                    } catch is CancellationError { throw CancellationError() }
-                    catch {
-                        if Task.isCancelled { throw CancellationError() }
-                        let failure = ImportFailure.record(sticker: sticker, stage: stage, error: error)
-                        await DownloadDiagnostics.shared.record("\(pack.name)/\(sticker.id.prefix(12)) · \(stage) · \(failure.code) · \(failure.message)")
-                        return DownloadOutcome(sticker: sticker, file: nil, bytes: 0, failure: failure)
+                            let source = directory.appendingPathComponent(sticker.id + ".source")
+                            defer { try? FileManager.default.removeItem(at: source) }
+                            _ = try await client.assetFile(pack: pack.name, sticker: sticker, destination: source)
+                            // Download the next files while one animation is being converted.
+                            try await Self.conversionGate.acquire()
+                            defer { Task { await Self.conversionGate.release() } }
+                            try Task.checkCancellation()
+                            let original = try Data(contentsOf: source, options: .mappedIfSafe)
+                            try Task.checkCancellation()
+                            stage = "변환"
+                            let png: Data
+                            var qualityLabel: String?
+                            if animated {
+                                var converted: ConvertedAnimation?
+                                for (index, quality) in AnimationQuality.fallback.enumerated() {
+                                    do {
+                                        if sticker.format == "animated" { converted = try await TGSConverter.convert(original, output: animation, quality: quality) }
+                                        else { converted = try await WebMConverter().convert(original, output: animation, quality: quality) }
+                                        if index > 0 { qualityLabel = quality.label }
+                                        break
+                                    } catch {
+                                        let resourceFailure = isConversionTimeout(error) ||
+                                            [WebMConversionFailure.deadline, .image, .output].contains(error as? WebMConversionFailure ?? .bitstream)
+                                        guard resourceFailure, index < AnimationQuality.fallback.count - 1 else { throw error }
+                                    }
+                                }
+                                guard let converted else { throw StickerImportError.unsupportedFormat }
+                                png = converted.poster
+                                qualityLabel = converted.quality ?? qualityLabel
+                            } else { png = try await converter.png(from: original) }
+                            try Task.checkCancellation()
+                            stage = "저장"
+                            try png.write(to: output, options: .atomic)
+                            if let qualityLabel { try qualityLabel.write(to: directory.appendingPathComponent(sticker.id + ".quality"), atomically: true, encoding: .utf8) }
+                            return DownloadOutcome(sticker: sticker, file: output, animation: animated ? animation : nil,
+                                bytes: png.count, quality: qualityLabel)
+                        } catch is CancellationError { throw CancellationError() }
+                        catch {
+                            if Task.isCancelled { throw CancellationError() }
+                            let failure = ImportFailure.record(sticker: sticker, stage: stage, error: error)
+                            let action = retryAttempt < 5 ? "자동 재다운로드 \(retryAttempt + 1)/5" : "5회 재시도 종료"
+                            await DownloadDiagnostics.shared.record("\(pack.name)/\(sticker.id.prefix(12)) · \(stage) · \(failure.code) · \(failure.message) · \(action)")
+                            if retryAttempt == 5 { return DownloadOutcome(sticker: sticker, file: nil, bytes: 0, failure: failure) }
+                            var seconds = min(30.0, pow(2.0, Double(retryAttempt + 1)))
+                            if case let StickerImportError.server(_, _, retryAfter) = error { seconds = max(seconds, Double(retryAfter)) }
+                            try await Task.sleep(for: .seconds(seconds + Double.random(in: 0.2...1.5)))
+                        }
                     }
+                    throw StickerImportError.network
                 }
             }
             // Downloads have no app-imposed concurrency cap. Expensive frame

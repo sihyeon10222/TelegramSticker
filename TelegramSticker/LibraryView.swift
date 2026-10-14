@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import UIKit
 
 @MainActor @Observable
@@ -102,6 +103,7 @@ struct LibraryView: View {
     @State private var coverImages = SampleStickerImages()
     @State private var bottomActionsHeight: CGFloat = 72
     @State private var confirmBulkDelete = false
+    @State private var importLinkFile = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -142,6 +144,8 @@ struct LibraryView: View {
         }
         .padding(.vertical, 4)
         .contextMenu {
+            PackLinkShareMenu(links: PackLinkList.links(for: [pack]))
+                .disabled(editMode == .active)
             if pack.telegramName != nil {
                 Button("팩 업데이트", systemImage: "arrow.clockwise") { importRequest = PackImportRequest(name: pack.telegramName, updating: true) }
                     .disabled(editMode == .active)
@@ -163,9 +167,18 @@ struct LibraryView: View {
                 Button("최적화") { optimizationRequest = OptimizationRequest(packIDs: bulkSelected) }
                     .disabled(bulkSelected.isEmpty || ImportActivity.shared.count > 0)
                     .accessibilityIdentifier("optimizeSelectedPacks")
+                PackLinkShareMenu(links: PackLinkList.links(for: model.packs.filter { bulkSelected.contains($0.id) }), title: "공유")
+                    .accessibilityIdentifier("shareSelectedPackLinks")
                 Button("삭제", role: .destructive) { confirmBulkDelete = true }
                     .disabled(bulkSelected.isEmpty || ImportActivity.shared.count > 0)
                     .accessibilityIdentifier("deleteSelectedPacks")
+                    .confirmationDialog("선택한 \(bulkSelected.count)개 팩을 삭제할까요?", isPresented: $confirmBulkDelete, titleVisibility: .visible) {
+                        Button("선택한 팩 삭제", role: .destructive) {
+                            let ids = Array(bulkSelected)
+                            bulkSelected.removeAll()
+                            Task { await model.delete(ids: ids) }
+                        }
+                    }
             }
             .font(.subheadline)
             .buttonStyle(.glass)
@@ -212,13 +225,6 @@ struct LibraryView: View {
                     .moveDisabled(!model.damagedPacks.isEmpty || ImportActivity.shared.count > 0)
                 }
             }
-            .confirmationDialog("선택한 \(bulkSelected.count)개 팩을 삭제할까요?", isPresented: $confirmBulkDelete, titleVisibility: .visible) {
-                Button("선택한 팩 삭제", role: .destructive) {
-                    let ids = Array(bulkSelected)
-                    bulkSelected.removeAll()
-                    Task { await model.delete(ids: ids) }
-                }
-            }
             .onChange(of: bulkSelected) { _, ids in
                 if editMode != .active, let id = ids.first { selected = id }
             }
@@ -256,6 +262,15 @@ struct LibraryView: View {
                     .accessibilityIdentifier("editPacks")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        PackLinkShareMenu(links: PackLinkList.links(for: model.packs), title: "전체 팩 링크 공유")
+                        Button("링크 파일 가져오기", systemImage: "doc.badge.plus") { importLinkFile = true }
+                        Text("Telegram 원본 링크가 있는 팩만 공유해요.")
+                    } label: { Image(systemName: "ellipsis") }
+                    .accessibilityLabel("팩 공유 및 링크 파일 가져오기")
+                    .accessibilityIdentifier("packLinkActions")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         if ImportActivity.shared.current?.busy == true {
                             ImportActivity.shared.presentCurrent()
@@ -287,6 +302,13 @@ struct LibraryView: View {
                 ContentUnavailableView("스티커 팩을 선택하세요", systemImage: "square.grid.2x2")
             }
         }
+        .fileImporter(isPresented: $importLinkFile, allowedContentTypes: [.stickerBridgeLinks, .plainText]) { result in
+            switch result {
+            case .success(let url): Task { await PackLinkInbox.shared.open(url) }
+            case .failure(let error): model.message = error.localizedDescription
+            }
+        }
+        .onChange(of: PackLinkInbox.shared.received?.id) { _, received in if received == nil { Task { await model.refresh() } } }
         .sheet(item: $importRequest, onDismiss: { Task { await model.refresh() } }) { request in
             if let writer = model.writer { ImportView(writer: writer, initialPackName: request.name, updating: request.updating, initialLinks: request.links) }
         }
@@ -406,6 +428,10 @@ private struct InstalledPackView: View {
         .navigationTitle(pack.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if pack.telegramName != nil {
+                PackLinkShareMenu(links: PackLinkList.links(for: [pack]))
+                    .accessibilityIdentifier("sharePackLink")
+            }
             Button(selecting ? "완료" : "선택") { selecting.toggle(); selectedStickers.removeAll(); preview = nil }
             if pack.telegramName != nil { Button("업데이트", systemImage: "arrow.clockwise", action: update).accessibilityIdentifier("updatePack") }
             Button("팩 삭제", systemImage: "trash", role: .destructive) { confirmDelete = true }
