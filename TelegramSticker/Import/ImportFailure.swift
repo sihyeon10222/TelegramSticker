@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 nonisolated struct ImportFailure: Codable, Identifiable, Sendable {
     let id: String
@@ -48,5 +49,35 @@ actor ImportFailureStore {
         guard StickerLink.validName(name) else { throw StickerImportError.invalidLink }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try JSONEncoder().encode(failures).write(to: root.appendingPathComponent(name + ".json"), options: .atomic)
+    }
+}
+
+nonisolated struct DownloadLogEntry: Codable, Identifiable {
+    var id = UUID()
+    var date = Date()
+    let detail: String
+}
+
+@MainActor @Observable
+final class DownloadDiagnostics {
+    static let shared = DownloadDiagnostics()
+    private static var file: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("download-log.json")
+    }
+    var entries: [DownloadLogEntry] = []
+    private init() {
+        if let data = try? Data(contentsOf: Self.file), let saved = try? JSONDecoder().decode([DownloadLogEntry].self, from: data) { entries = saved }
+    }
+    func record(_ detail: String) {
+        entries.append(DownloadLogEntry(detail: detail))
+        if entries.count > 500 { entries.removeFirst(entries.count - 500) }
+        persist()
+    }
+    func clear() { entries.removeAll(); persist() }
+    var text: String { entries.map { "[\($0.date.formatted(date: .omitted, time: .standard))] \($0.detail)" }.joined(separator: "\n") }
+    private func persist() {
+        try? FileManager.default.createDirectory(at: Self.file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(entries) { try? data.write(to: Self.file, options: .atomic) }
     }
 }

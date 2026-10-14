@@ -5,6 +5,10 @@ import ImageIO
 final class ImportActivity {
     static let shared = ImportActivity()
     var count = 0
+    var libraryChangeID = 0
+    var current: ImportModel?
+    var presentedImport: ImportModel?
+    func presentCurrent() { presentedImport = current }
 }
 
 struct AdditionalPackLink: Identifiable {
@@ -12,35 +16,46 @@ struct AdditionalPackLink: Identifiable {
     var value = ""
 }
 struct BatchPackStatus: Identifiable {
-    let id = UUID()
+    let id: UUID
     let link: String
     var title: String
     var status = "대기 중"
 }
 
 @MainActor @Observable
-final class ImportModel {
+final class ImportModel: Identifiable {
+    let id = UUID()
     var link = ""
     var additionalLinks: [AdditionalPackLink] = []
     var batchStatuses: [BatchPackStatus] = []
-    private var batchFractions: [Double] = []
+    private var batchCounts: [Int: ImportProgress] = [:]
+    private var batchLookupReady = false
+    private var batchLookupFailures = 0
+    var downloadSummary = "준비 중"
     var pack: RemotePack?
     var message: String?
     var progress: ImportProgress?
     var busy = false {
-        didSet { if oldValue != busy { ImportActivity.shared.count = max(0, ImportActivity.shared.count + (busy ? 1 : -1)) } }
+        didSet {
+            if oldValue != busy {
+                ImportActivity.shared.count = max(0, ImportActivity.shared.count + (busy ? 1 : -1))
+                if busy { ImportActivity.shared.current = self }
+            }
+        }
     }
     var installed = false
     var result: ImportResult?
     var client: WorkerClient?
     var failures: [ImportFailure] = []
     var updating = false
+    var restoringOriginal = false
     private let coordinator: ImportCoordinator
     private var operation: Task<Void, Never>?
     private var backgroundID: String?
     init(writer: LibraryWriter, root: URL? = nil) { coordinator = ImportCoordinator(writer: writer, root: root) }
 
     func configure() async {
+        guard !busy else { return }
         pack = nil; progress = nil; installed = false; result = nil; client = nil
         do {
             #if DEBUG
@@ -89,32 +104,39 @@ final class ImportModel {
     func download(onlyIDs: Set<String>? = nil) {
         guard !busy, let client, let pack else { return }
         guard ImportActivity.shared.count == 0 else { message = "진행 중인 설치·최적화 작업을 먼저 마쳐 주세요."; return }
-        busy = true; message = nil
+        busy = true; message = nil; downloadSummary = "준비 중"
         operation = Task {
             backgroundID = await BackgroundWork.shared.begin(title: updating ? "스티커 팩 업데이트" : "스티커 설치") { self.cancel() }
             var success = false
             defer { BackgroundWork.shared.end(id: backgroundID, success: success); backgroundID = nil; busy = false }
             do {
-                let receipt = try await coordinator.install(pack, client: client, updating: updating, onlyIDs: onlyIDs) { value in
+                let receipt = try await coordinator.install(pack, client: client, updating: updating, onlyIDs: onlyIDs, restoringOriginal: restoringOriginal) { value in
                     await self.updateProgress(value)
                 }
                 result = receipt; installed = receipt.failed == 0; message = receipt.message; success = receipt.failed == 0
+                ImportActivity.shared.libraryChangeID += 1
             } catch is CancellationError { message = "중단했어요. 다시 시도하면 준비된 파일을 재사용해요." }
             catch { message = error.localizedDescription }
             failures = await ImportFailureStore.shared.load(name: pack.name)
+            if !success, let message { DownloadDiagnostics.shared.record("\(pack.name) · 설치 종료 · \(message)") }
         }
     }
     func downloadBatch() {
         guard !busy, let client else { return }
         guard ImportActivity.shared.count == 0 else { message = "진행 중인 설치·최적화 작업을 먼저 마쳐 주세요."; return }
-        let links = ([link] + additionalLinks.map(\.value)).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        let inputs = ([(id: id, value: link)] + additionalLinks.map { (id: $0.id, value: $0.value) })
+            .map { (id: $0.id, value: $0.value.trimmingCharacters(in: .whitespacesAndNewlines)) }.filter { !$0.value.isEmpty }
+        let links = inputs.map { $0.value }
         guard !links.isEmpty else { message = "팩 링크를 입력해 주세요."; return }
-        batchStatuses = links.map { BatchPackStatus(link: $0, title: $0) }
-        batchFractions = Array(repeating: 0, count: links.count)
+        batchStatuses = inputs.map { BatchPackStatus(id: $0.id, link: $0.value, title: $0.value) }
+        batchCounts = [:]
+        batchLookupReady = false
+        batchLookupFailures = 0
+        downloadSummary = "팩 목록 조회 중"
         let batchUpdating = updating
         busy = true; message = nil; pack = nil; progress = nil
         operation = Task {
-            backgroundID = await BackgroundWork.shared.begin(title: updating ? "스티커 팩 일괄 업데이트" : "스티커 팩 일괄 설치") { self.cancel() }
+            backgroundID = await BackgroundWork.shared.begin(title: restoringOriginal ? "스티커 원본 복원" : (updating ? "스티커 팩 일괄 업데이트" : "스티커 팩 일괄 설치")) { self.cancel() }
             var success = false
             defer { BackgroundWork.shared.end(id: backgroundID, success: success); backgroundID = nil; busy = false }
             do {
@@ -129,32 +151,38 @@ final class ImportModel {
                             if seen.insert(name).inserted { pending.append((index, name)) }
                             else {
                                 batchStatuses[index].status = "중복 링크 · 건너뜀"
-                                batchFractions[index] = 1
                             }
                         } catch {
                             batchStatuses[index].status = "실패 · " + error.localizedDescription
-                            batchFractions[index] = 1
+                            batchLookupFailures += 1
                         }
                     }
                     reportBatchProgress()
-                    // Limit pack work to three. All workers share the client's
-                    // three-request gate and the serial animation conversion gate.
-                    try await withThrowingTaskGroup(of: Void.self) { group in
-                        var next = 0
-                        func enqueue() {
-                            let item = pending[next]
-                            next += 1
+                    // Resolve all pack sizes first so the activity has one stable
+                    // item total, rather than a denominator that grows mid-download.
+                    let ready = try await withThrowingTaskGroup(of: (Int, RemotePack)?.self) { group in
+                        for item in pending {
                             group.addTask { @MainActor in
-                                let worker = try await self.coordinator.batchWorker(directory: directory, name: item.name)
-                                try await self.installBatchPack(index: item.index, name: item.name,
+                                try await self.prepareBatchPack(index: item.index, name: item.name,
+                                    client: client, updating: batchUpdating)
+                            }
+                        }
+                        var packs: [(Int, RemotePack)] = []
+                        for try await pack in group { if let pack { packs.append(pack) } }
+                        return packs
+                    }
+                    batchLookupReady = true
+                    reportBatchProgress()
+                    // No application-level cap on simultaneous packs.
+                    try await withThrowingTaskGroup(of: Void.self) { group in
+                        for (index, remote) in ready {
+                            group.addTask { @MainActor in
+                                let worker = try await self.coordinator.batchWorker(directory: directory, name: remote.name)
+                                try await self.installBatchPack(index: index, remote: remote,
                                     client: client, worker: worker, updating: batchUpdating)
                             }
                         }
-                        for _ in 0..<min(3, pending.count) { enqueue() }
-                        while try await group.next() != nil {
-                            try Task.checkCancellation()
-                            if next < pending.count { enqueue() }
-                        }
+                        try await group.waitForAll()
                     }
                     try Task.checkCancellation()
                     success = !batchStatuses.contains { $0.status.hasPrefix("실패") || $0.status.contains("개 실패") }
@@ -163,6 +191,8 @@ final class ImportModel {
                 } catch {
                     // The task group has joined all children before releasing
                     // the root lease, including when a user cancels the batch.
+                    try? await coordinator.orderBatch(links: links)
+                    ImportActivity.shared.libraryChangeID += 1
                     await coordinator.endBatch(directory: directory, completed: false)
                     throw error
                 }
@@ -176,56 +206,110 @@ final class ImportModel {
         }
     }
 
-    private func installBatchPack(index: Int, name: String, client: WorkerClient,
-                                  worker: ImportCoordinator, updating: Bool) async throws {
+    private func prepareBatchPack(index: Int, name: String, client: WorkerClient,
+                                  updating: Bool) async throws -> (Int, RemotePack)? {
         do {
             try Task.checkCancellation()
             batchStatuses[index].status = "팩 조회 중"
-            reportBatchProgress()
             let remote = try await client.pack(name: name, refresh: updating)
             try Task.checkCancellation()
             batchStatuses[index].title = remote.title
+            batchStatuses[index].status = "대기 중"
+            batchCounts[index] = ImportProgress(completed: 0, total: remote.stickers.count, failed: 0)
+            reportBatchProgress()
+            return (index, remote)
+        } catch is CancellationError { throw CancellationError() }
+        catch {
+            if Task.isCancelled { throw CancellationError() }
+            batchStatuses[index].status = "실패 · " + error.localizedDescription
+            batchLookupFailures += 1
+            DownloadDiagnostics.shared.record("\(name) · 팩 조회 실패 · \(error.localizedDescription)")
+            reportBatchProgress()
+            return nil
+        }
+    }
+
+    private func installBatchPack(index: Int, remote: RemotePack, client: WorkerClient,
+                                  worker: ImportCoordinator, updating: Bool) async throws {
+        do {
+            try Task.checkCancellation()
             if !updating, let installed = try await worker.installedResult(for: remote), installed.failed == 0 {
                 batchStatuses[index].status = "이미 설치됨 · 건너뜀"
+                batchCounts[index] = ImportProgress(completed: remote.stickers.count, total: remote.stickers.count, failed: 0)
             } else {
                 batchStatuses[index].status = "다운로드 중"
-                let receipt = try await worker.install(remote, client: client, updating: updating) { value in
+                var receipt = try await worker.install(remote, client: client, updating: updating, restoringOriginal: restoringOriginal) { value in
                     await self.updateBatchProgress(index: index, value: value)
                 }
+                if receipt.failed > 0 {
+                    let retryIDs = Set(await ImportFailureStore.shared.load(name: remote.name).filter { $0.retryable && $0.code != "disk_full" }.map(\.id))
+                    if !retryIDs.isEmpty {
+                        batchStatuses[index].status = "실패 항목 자동 재시도 중"
+                        await DownloadDiagnostics.shared.record("\(remote.name) · 일시 실패 \(retryIDs.count)개 자동 재시도")
+                        receipt = try await worker.install(remote, client: client, updating: updating, onlyIDs: retryIDs, restoringOriginal: restoringOriginal) { value in
+                            await self.updateBatchProgress(index: index, value: value)
+                        }
+                    }
+                }
+                batchCounts[index] = ImportProgress(completed: receipt.installed, total: receipt.total, failed: receipt.failed)
                 batchStatuses[index].status = receipt.failed == 0 ? "\(receipt.installed)개 설치 완료" : "\(receipt.installed)개 설치 · \(receipt.failed)개 실패 (다시 시도 가능)"
             }
         } catch is CancellationError { throw CancellationError() }
         catch {
             if Task.isCancelled { throw CancellationError() }
             batchStatuses[index].status = "실패 · " + error.localizedDescription
+            DownloadDiagnostics.shared.record("\(remote.name) · 팩 설치 실패 · \(error.localizedDescription)")
+            if let counts = batchCounts[index] {
+                batchCounts[index] = ImportProgress(completed: counts.completed, total: counts.total,
+                    failed: max(0, counts.total - counts.completed))
+            }
         }
-        batchFractions[index] = 1
+        do { try await coordinator.orderBatch(links: batchStatuses.map(\.link)) }
+        catch { DownloadDiagnostics.shared.record("팩 정렬 · \(error.localizedDescription)") }
+        ImportActivity.shared.libraryChangeID += 1
         reportBatchProgress()
     }
 
     private func updateBatchProgress(index: Int, value: ImportProgress) {
-        // Leave the final five percent for publishing the installed pack.
-        let fraction = min(0.95, Double(value.completed + value.failed) / Double(max(1, value.total)) * 0.95)
-        batchFractions[index] = max(batchFractions[index], fraction)
+        // An update may retain old items; cap displayed counts to the remote total.
+        let completed = min(value.total, max(0, value.completed))
+        batchCounts[index] = ImportProgress(completed: completed, total: value.total,
+            failed: min(max(0, value.failed), max(0, value.total - completed)))
         batchStatuses[index].status = "준비 \(value.completed)/\(value.total) · 실패 \(value.failed)"
         reportBatchProgress()
     }
 
     private func reportBatchProgress() {
-        let finished = batchFractions.filter { $0 == 1 }.count
-        let active = batchStatuses.filter { $0.status == "팩 조회 중" || $0.status == "다운로드 중" || $0.status.hasPrefix("준비 ") }.count
-        BackgroundWork.shared.report(id: backgroundID,
-            completed: Int64(batchFractions.reduce(0, +) * 1000),
-            total: Int64(batchFractions.count * 1000),
-            subtitle: "팩 \(finished)/\(batchFractions.count) 완료 · \(active)개 동시 처리 중")
+        guard batchLookupReady else {
+            downloadSummary = "팩 목록 조회 중 · \(batchCounts.count)개 확인"
+            BackgroundWork.shared.report(id: backgroundID, completed: 0, total: 1, subtitle: downloadSummary)
+            return
+        }
+        let completed = batchCounts.values.reduce(0) { $0 + $1.completed }
+        let failed = batchCounts.values.reduce(0) { $0 + $1.failed }
+        let total = batchCounts.values.reduce(0) { $0 + $1.total }
+        let processed = min(total, completed + failed)
+        let percent = total == 0 ? 0 : processed * 100 / total
+        downloadSummary = "전체 \(total) · 완료 \(completed) · 실패 \(failed) · \(percent)%"
+        if batchLookupFailures > 0 { downloadSummary += " · 조회 실패 \(batchLookupFailures)팩" }
+        BackgroundWork.shared.report(id: backgroundID, completed: Int64(processed),
+            total: Int64(total), subtitle: downloadSummary)
     }
+    func itemProgress(id: UUID) -> ImportProgress? {
+        guard let index = batchStatuses.firstIndex(where: { $0.id == id }) else { return nil }
+        return batchCounts[index]
+    }
+
     private func loadInstalledStatus(_ pack: RemotePack) async throws {
         result = try await coordinator.installedResult(for: pack)
         installed = !updating && result?.failed == 0
     }
     private func updateProgress(_ value: ImportProgress) {
         progress = value
-        BackgroundWork.shared.report(id: backgroundID, completed: Int64(value.completed + value.failed), total: Int64(value.total + 1), subtitle: "준비 \(value.completed)/\(value.total) · 실패 \(value.failed)")
+        let processed = min(value.total, value.completed + value.failed)
+        let percent = value.total == 0 ? 0 : processed * 100 / value.total
+        downloadSummary = "전체 \(value.total) · 완료 \(value.completed) · 실패 \(value.failed) · \(percent)%"
+        BackgroundWork.shared.report(id: backgroundID, completed: Int64(processed), total: Int64(value.total), subtitle: downloadSummary)
     }
     func cancel() { operation?.cancel() }
 }
@@ -234,18 +318,63 @@ struct ImportView: View {
     @ScaledMetric(relativeTo: .caption) private var stickerWidth = 64
     @State private var model: ImportModel
     @State private var settings = false
+    @State private var showLogs = false
     private let initialPackName: String?
     private let updating: Bool
     private let initialLinks: [String]
+    private let resumesSession: Bool
     @FocusState private var linkFocused: Bool
     @Environment(\.dismiss) private var dismiss
     init(writer: LibraryWriter, initialPackName: String? = nil, updating: Bool = false, initialLinks: [String] = []) {
-        _model = State(initialValue: ImportModel(writer: writer)); self.initialPackName = initialPackName; self.updating = updating; self.initialLinks = initialLinks
+        if let current = ImportActivity.shared.current, current.busy {
+            _model = State(initialValue: current)
+            self.initialPackName = nil; self.updating = current.updating; self.initialLinks = []
+            resumesSession = true
+        } else {
+            _model = State(initialValue: ImportModel(writer: writer))
+            self.initialPackName = initialPackName; self.updating = updating; self.initialLinks = initialLinks
+            resumesSession = false
+        }
     }
+    init(model: ImportModel) {
+        _model = State(initialValue: model)
+        initialPackName = nil; updating = model.updating; initialLinks = []
+        resumesSession = true
+    }
+    @ViewBuilder
+    private func linkStatus(id: UUID, value: String) -> some View {
+        if let item = model.batchStatuses.first(where: { $0.id == id && $0.link == value.trimmingCharacters(in: .whitespacesAndNewlines) }) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(item.title == item.link ? "팩 이름 조회 중" : item.title).font(.subheadline.bold()).lineLimit(2)
+                Text(item.status).font(.caption).foregroundStyle(item.status.hasPrefix("실패") ? .red : .secondary)
+                if let progress = model.itemProgress(id: id) {
+                    ProgressView(value: Double(min(progress.total, progress.completed + progress.failed)), total: Double(max(1, progress.total)))
+                    Text("완료 \(progress.completed)/\(progress.total) · 실패 \(progress.failed)")
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            }.padding(.horizontal, 4).padding(.bottom, 8)
+        } else if id == model.id, let pack = model.pack {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(pack.title).font(.subheadline.bold())
+                Text("전체 \(pack.stickers.count)개 · 설치 대상 \(pack.installableStickers.count)개").font(.caption).foregroundStyle(.secondary)
+                if let progress = model.progress {
+                    ProgressView(value: Double(min(progress.total, progress.completed + progress.failed)), total: Double(max(1, progress.total)))
+                    Text("완료 \(progress.completed)/\(progress.total) · 실패 \(progress.failed)").font(.caption2.monospacedDigit())
+                }
+            }.padding(.horizontal, 4)
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if model.busy {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(model.downloadSummary).font(.subheadline.monospacedDigit())
+                            ProgressView(value: BackgroundWork.shared.fraction)
+                        }
+                    }
                     if model.pack == nil {
                         Text("Telegram 공개 팩 링크를 추가하세요.").font(.subheadline).foregroundStyle(.secondary)
                     }
@@ -257,35 +386,35 @@ struct ImportView: View {
                         .disabled(model.busy)
                         .focused($linkFocused).submitLabel(.go)
                         .onSubmit { linkFocused = false; model.preview() }
-                    if !updating && initialPackName == nil {
+                    linkStatus(id: model.id, value: model.link)
+                    if initialPackName == nil {
                         ForEach($model.additionalLinks) { $entry in
-                            HStack {
-                                TextField("https://t.me/addstickers/…", text: $entry.value)
-                                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                                    .padding(12).background(Color(uiColor: .tertiarySystemFill).opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-                                Button { model.additionalLinks.removeAll { $0.id == entry.id } } label: {
-                                    Image(systemName: "minus.circle").frame(width: 44, height: 44)
-                                }.accessibilityLabel("링크 삭제")
-                            }.disabled(model.busy)
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    TextField("https://t.me/addstickers/…", text: $entry.value)
+                                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                                        .padding(12).background(Color(uiColor: .tertiarySystemFill).opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+                                    Button { model.additionalLinks.removeAll { $0.id == entry.id } } label: {
+                                        Image(systemName: "minus.circle").frame(width: 44, height: 44)
+                                    }.accessibilityLabel("링크 삭제")
+                                }.disabled(model.busy)
+                                linkStatus(id: entry.id, value: entry.value)
+                            }
                         }
                         Button { model.additionalLinks.append(AdditionalPackLink()) } label: {
                             Label("링크 추가", systemImage: "plus.circle")
-                        }.disabled(model.busy).accessibilityIdentifier("addPackLink")
-                        if !model.additionalLinks.isEmpty {
+                        }.buttonStyle(.glass).disabled(model.busy || updating).accessibilityIdentifier("addPackLink")
+                        if !model.additionalLinks.isEmpty || !model.batchStatuses.isEmpty || model.restoringOriginal {
                             Button { linkFocused = false; model.downloadBatch() } label: {
-                                Label("입력한 팩 모두 설치", systemImage: "arrow.down.circle").frame(maxWidth: .infinity)
+                                Label(model.restoringOriginal ? "입력한 팩 원본 복원" : (updating ? "입력한 팩 모두 업데이트" : "입력한 팩 모두 설치"), systemImage: "arrow.down.circle").frame(maxWidth: .infinity)
                             }.buttonStyle(.glassProminent).controlSize(.large)
                                 .disabled(model.busy || model.client == nil).accessibilityIdentifier("installBatch")
-                            Text("최대 3개 팩을 동시에 설치해요. 한 팩이 실패해도 다른 팩은 계속하고, 이미 설치한 팩과 중복 링크는 건너뛰어요.")
+                            Text("입력한 팩을 동시에 다운로드해요. 한 팩이 실패해도 다른 팩은 계속하고, 이미 설치한 팩과 중복 링크는 건너뛰어요.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    ForEach(model.batchStatuses) { item in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.title).font(.subheadline.bold()).lineLimit(2)
-                            Text(item.status).font(.caption).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    Button("다운로드 로그", systemImage: "doc.text.magnifyingglass") { showLogs = true }
+                        .buttonStyle(.glass)
                     if model.additionalLinks.isEmpty {
                     Button { linkFocused = false; model.preview() } label: {
                         Label("팩 미리보기", systemImage: "magnifyingglass").frame(maxWidth: .infinity)
@@ -295,18 +424,9 @@ struct ImportView: View {
                     }
                     if let message = model.message { Text(message).font(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("importMessage") }
                     if let pack = model.pack, model.additionalLinks.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(pack.title).font(.title3.bold())
-                            Text("전체 \(pack.stickers.count)개 · 설치 대상 \(pack.installableStickers.count)개")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
                         if pack.installableStickers.count != pack.stickers.count {
                             Text("마스크·커스텀 이모지 팩은 설치하지 않아요.")
                                 .font(.footnote).foregroundStyle(.secondary)
-                        }
-                        if let progress = model.progress {
-                            ProgressView(value: Double(progress.completed + progress.failed), total: Double(max(1, progress.total)))
-                            Text("준비 \(progress.completed)/\(progress.total) · 실패 \(progress.failed)").font(.caption)
                         }
                         Button { model.download() } label: {
                             Text(updating ? (model.installed ? "업데이트 완료" : "팩 업데이트") : model.result.map { $0.failed > 0 ? "실패한 \($0.failed)개 다시 시도" : "설치 완료" }
@@ -346,14 +466,16 @@ struct ImportView: View {
                 }.padding().frame(maxWidth: 640).frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle(updating ? "스티커 팩 업데이트" : "Telegram 팩 추가")
+            .navigationTitle(model.restoringOriginal ? "스티커 원본 복원" : (updating ? "스티커 팩 업데이트" : "Telegram 팩 추가"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("닫기") { dismiss() }.accessibilityIdentifier("closeImport") }
                 ToolbarItem(placement: .topBarTrailing) { Button("연결 설정") { settings = true }.disabled(model.busy) }
             }
+            .sheet(isPresented: $showLogs) { DownloadLogsView() }
             .sheet(isPresented: $settings, onDismiss: { Task { await model.configure() } }) { ImportConnectionView() }
             .task {
+                guard !resumesSession else { return }
                 model.updating = updating
                 await model.configure()
                 if let first = initialLinks.first {
@@ -438,6 +560,31 @@ private struct ImportConnectionView: View {
                 .task {
                     if let config = try? ImportSettings.load() { address = config.origin.absoluteString; key = config.accessKey }
                 }
+        }
+    }
+}
+
+struct DownloadLogsView: View {
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List {
+                if DownloadDiagnostics.shared.entries.isEmpty { Text("아직 기록된 실패·재시도가 없어요.").foregroundStyle(.secondary) }
+                ForEach(DownloadDiagnostics.shared.entries.reversed()) { entry in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(entry.date.formatted(date: .abbreviated, time: .standard)).font(.caption).foregroundStyle(.secondary)
+                        Text(entry.detail).font(.footnote.monospaced()).textSelection(.enabled)
+                    }
+                }
+            }
+            .navigationTitle("다운로드 로그")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("닫기") { dismiss() } }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("복사") { UIPasteboard.general.string = DownloadDiagnostics.shared.text }
+                    Button("비우기", role: .destructive) { DownloadDiagnostics.shared.clear() }
+                }
+            }
         }
     }
 }

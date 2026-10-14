@@ -100,6 +100,8 @@ struct LibraryView: View {
     @State private var bulkSelected = Set<String>()
     @State private var optimizationRequest: OptimizationRequest?
     @State private var coverImages = SampleStickerImages()
+    @State private var bottomActionsHeight: CGFloat = 72
+    @State private var confirmBulkDelete = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -149,7 +151,7 @@ struct LibraryView: View {
 
     private var packEditingActions: some View {
         GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Button("전체 선택") { bulkSelected = Set(model.packs.map(\.id)) }
                 Button("업데이트") {
                     let links = model.packs.filter { bulkSelected.contains($0.id) }
@@ -161,7 +163,11 @@ struct LibraryView: View {
                 Button("최적화") { optimizationRequest = OptimizationRequest(packIDs: bulkSelected) }
                     .disabled(bulkSelected.isEmpty || ImportActivity.shared.count > 0)
                     .accessibilityIdentifier("optimizeSelectedPacks")
+                Button("삭제", role: .destructive) { confirmBulkDelete = true }
+                    .disabled(bulkSelected.isEmpty || ImportActivity.shared.count > 0)
+                    .accessibilityIdentifier("deleteSelectedPacks")
             }
+            .font(.subheadline)
             .buttonStyle(.glass)
             .lineLimit(1)
         }
@@ -203,7 +209,14 @@ struct LibraryView: View {
                         }
                     }
                     .onMove { source, destination in Task { await model.move(from: source, to: destination) } }
-                    .moveDisabled(!model.damagedPacks.isEmpty)
+                    .moveDisabled(!model.damagedPacks.isEmpty || ImportActivity.shared.count > 0)
+                }
+            }
+            .confirmationDialog("선택한 \(bulkSelected.count)개 팩을 삭제할까요?", isPresented: $confirmBulkDelete, titleVisibility: .visible) {
+                Button("선택한 팩 삭제", role: .destructive) {
+                    let ids = Array(bulkSelected)
+                    bulkSelected.removeAll()
+                    Task { await model.delete(ids: ids) }
                 }
             }
             .onChange(of: bulkSelected) { _, ids in
@@ -215,13 +228,17 @@ struct LibraryView: View {
             .disabled(model.isBusy)
             .environment(\.editMode, $editMode)
             // Keep the scroll geometry and Glass hosts stable across editing changes.
-            .contentMargins(.bottom, 72, for: .scrollContent)
+            .contentMargins(.bottom, bottomActionsHeight, for: .scrollContent)
             .overlay(alignment: .bottom) {
-                packEditingActions
-                    .opacity(editMode == .active ? 1 : 0)
-                    .offset(y: editMode == .active || reduceMotion ? 0 : 16)
-                    .allowsHitTesting(editMode == .active)
-                    .accessibilityHidden(editMode != .active)
+                VStack(spacing: 0) {
+                    packEditingActions
+                        .opacity(editMode == .active ? 1 : 0)
+                        .offset(y: editMode == .active || reduceMotion ? 0 : 16)
+                        .allowsHitTesting(editMode == .active)
+                        .accessibilityHidden(editMode != .active)
+                    CurrentWorkBanner()
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bottomActionsHeight = $0 }
             }
             .navigationTitle("내 스티커 팩")
             .toolbar {
@@ -240,7 +257,13 @@ struct LibraryView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        importRequest = PackImportRequest(name: nil, updating: false)
+                        if ImportActivity.shared.current?.busy == true {
+                            ImportActivity.shared.presentCurrent()
+                        } else if OptimizationCenter.shared.current?.running == true {
+                            OptimizationCenter.shared.presentCurrent()
+                        } else {
+                            importRequest = PackImportRequest(name: nil, updating: false)
+                        }
                     } label: { Label("팩 추가", systemImage: "plus") }
                     .accessibilityIdentifier("addPack")
                     .disabled(!model.isAvailable || model.isBusy)
@@ -270,6 +293,7 @@ struct LibraryView: View {
         .sheet(item: $optimizationRequest, onDismiss: { Task { await model.refresh() } }) { request in
             OptimizationView(request: request)
         }
+        .onChange(of: ImportActivity.shared.libraryChangeID) { _, _ in Task { await model.refresh() } }
         .onChange(of: ImportActivity.shared.count) { _, count in if count == 0 { Task { await model.refresh() } } }
         .task {
             #if DEBUG

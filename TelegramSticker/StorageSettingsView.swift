@@ -12,10 +12,14 @@ struct StorageSettingsView: View {
         LabeledContent("설치 데이터", value: ByteCountFormatter.string(fromByteCount: installed, countStyle: .file))
         LabeledContent("삭제 가능한 캐시", value: ByteCountFormatter.string(fromByteCount: disposable, countStyle: .file))
         Button("스티커 용량 최적화") { optimization = true }
-            .disabled(busy || clearing || installed == 0 || ImportActivity.shared.count > 0)
+            .disabled(clearing || (installed == 0 && OptimizationCenter.shared.current == nil))
             .buttonStyle(.glass)
             .accessibilityIdentifier("optimizeStorage")
             .sheet(isPresented: $optimization) { OptimizationView(request: OptimizationRequest()) }
+        if OptimizationCenter.shared.current != nil {
+            Button("최근 최적화 다시 열기", systemImage: "arrow.up.forward.app") { OptimizationCenter.shared.presentCurrent() }
+                .buttonStyle(.glass)
+        }
         Button("캐시 삭제") {
             clearing = true
             Task {

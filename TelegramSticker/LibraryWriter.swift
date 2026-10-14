@@ -181,6 +181,22 @@ actor LibraryWriter {
         if LibraryReader.safeID(id) { try? FileManager.default.removeItem(at: reader.file("packs/\(id)")) }
     }
 
+    /// Merge against the current index inside this actor, so parallel publications
+    /// cannot race a stale full-list reorder. Unrelated packs retain their order.
+    func orderImported(ids: [String]) throws {
+        var index = try reader.index()
+        let targets = Set(ids)
+        let references = Dictionary(uniqueKeysWithValues: index.packs.map { ($0.id, $0) })
+        var seen = Set<String>()
+        let ordered = ids.filter { seen.insert($0).inserted }.compactMap { references[$0] }
+        let first = index.packs.firstIndex { targets.contains($0.id) } ?? index.packs.count
+        var others = index.packs.filter { !targets.contains($0.id) }
+        others.insert(contentsOf: ordered, at: min(first, others.count))
+        guard others.map(\.id) != index.packs.map(\.id) else { return }
+        index.packs = others
+        try save(index)
+    }
+
     func reorder(ids: [String]) throws {
         var index = try reader.index()
         guard ids.count == index.packs.count, Set(ids) == Set(index.packs.map(\.id)) else {

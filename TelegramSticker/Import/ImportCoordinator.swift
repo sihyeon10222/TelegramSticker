@@ -33,6 +33,7 @@ actor ImportCoordinator {
     private let writer: LibraryWriter
     private let converter = StaticImageConverter()
     private static let conversionGate = RequestGate(limit: 1)
+    private static let pipelineGate = RequestGate(limit: 8)
     private let root: URL
     init(writer: LibraryWriter, root: URL? = nil) {
         self.writer = writer
@@ -95,6 +96,11 @@ actor ImportCoordinator {
         return ImportCoordinator(writer: writer, root: directory.appendingPathComponent(name, isDirectory: true))
     }
 
+    func orderBatch(links: [String]) async throws {
+        let ids = links.compactMap { try? StickerLink.parse($0) }.map { "telegram-" + $0 }
+        try await writer.orderImported(ids: ids)
+    }
+
     func endBatch(directory: URL, completed: Bool) async {
         if completed { try? FileManager.default.removeItem(at: directory) }
         await ImportJobCache.shared.end(root: root)
@@ -102,7 +108,7 @@ actor ImportCoordinator {
 
     @discardableResult
     func install(_ pack: RemotePack, client: WorkerClient,
-                 updating: Bool = false, onlyIDs: Set<String>? = nil,
+                 updating: Bool = false, onlyIDs: Set<String>? = nil, restoringOriginal: Bool = false,
                  progress: @escaping @Sendable (ImportProgress) async -> Void) async throws -> ImportResult {
         try pack.validate(requestedName: pack.name)
         let existing = try await writer.pack(id: "telegram-" + pack.name)
@@ -112,7 +118,7 @@ actor ImportCoordinator {
         guard pack.stickerType == "regular", updating || !pack.installableStickers.isEmpty else { throw StickerImportError.noStaticStickers }
         let oldByID = Dictionary(uniqueKeysWithValues: (existing?.stickers ?? []).map { ($0.id, $0) })
         let reusable: Set<String>
-        if updating, let existing { reusable = try await writer.reusableStickerIDs(in: existing) } else { reusable = [] }
+        if updating, !restoringOriginal, let existing { reusable = try await writer.reusableStickerIDs(in: existing) } else { reusable = [] }
         let requestedIDs = updating ? pack.installableStickers.filter { oldByID[$0.id]?.sourceFormat != $0.format || !reusable.contains($0.id) }.map(\.id)
             : existing?.pendingStickerIDs ?? pack.installableStickers.map(\.id)
         let requested = Set(requestedIDs)
@@ -121,6 +127,7 @@ actor ImportCoordinator {
         encoder.outputFormatting = .sortedKeys
         var cachePack = pack; cachePack.fetchedAt = nil; cachePack.refreshed = nil
         var signature = try encoder.encode(cachePack)
+        if restoringOriginal { signature.append(contentsOf: "restore-original-v1".utf8) }
         signature.append(contentsOf: client.configuration.origin.absoluteString.utf8)
         if candidates.contains(where: { $0.format != "static" }) {
             // Do not reuse GIFs produced before timing correction/frame sampling changes.
@@ -148,6 +155,9 @@ actor ImportCoordinator {
         var finished: [String: DownloadOutcome] = [:]
         let previousCount = existing?.stickers.count ?? 0
         let total = updating ? pack.stickers.count : existing?.originalCount ?? pack.stickers.count
+        // Updated items replace old items; counting the whole old pack and then
+        // adding new downloads would reach 100% before those downloads finish.
+        let readyCount = updating ? max(0, total - requestedIDs.count) : previousCount
         var failures = await ImportFailureStore.shared.load(name: pack.name)
         failures.removeAll { !requestedIDs.contains($0.id) }
         for id in requestedIDs where !pack.stickers.contains(where: { $0.id == id }) && !failures.contains(where: { $0.id == id }) {
@@ -156,11 +166,12 @@ actor ImportCoordinator {
         let candidateIDs = Set(candidates.map(\.id))
         failures.removeAll { candidateIDs.contains($0.id) }
         var failed = requestedIDs.count - candidates.count
-        await progress(ImportProgress(completed: previousCount, total: total, failed: failed))
+        await progress(ImportProgress(completed: readyCount, total: total, failed: failed))
         try await withThrowingTaskGroup(of: DownloadOutcome.self) { group in
-            var next = 0
             func add(_ sticker: RemoteSticker) {
                 group.addTask {
+                    try await Self.pipelineGate.acquire()
+                    defer { Task { await Self.pipelineGate.release() } }
                     try Task.checkCancellation()
                     let output = directory.appendingPathComponent(sticker.id + ".png")
                     let animation = directory.appendingPathComponent(sticker.id + ".gif")
@@ -213,13 +224,15 @@ actor ImportCoordinator {
                     } catch is CancellationError { throw CancellationError() }
                     catch {
                         if Task.isCancelled { throw CancellationError() }
-                        return DownloadOutcome(sticker: sticker, file: nil, bytes: 0, failure: .record(sticker: sticker, stage: stage, error: error))
+                        let failure = ImportFailure.record(sticker: sticker, stage: stage, error: error)
+                        await DownloadDiagnostics.shared.record("\(pack.name)/\(sticker.id.prefix(12)) · \(stage) · \(failure.code) · \(failure.message)")
+                        return DownloadOutcome(sticker: sticker, file: nil, bytes: 0, failure: failure)
                     }
                 }
             }
-            // Three downloads overlap; the shared conversion gate keeps expensive rendering serial.
-            let concurrency = 3
-            for _ in 0..<min(concurrency, candidates.count) { add(candidates[next]); next += 1 }
+            // Downloads have no app-imposed concurrency cap. Expensive frame
+            // rendering remains serialized independently of network transfers.
+            for sticker in candidates { add(sticker) }
             while let result = try await group.next() {
                 try Task.checkCancellation()
                 if let existing, try await !writer.hasRevision(id: existing.id, revision: existing.revision) {
@@ -228,8 +241,7 @@ actor ImportCoordinator {
                 if result.file != nil { finished[result.sticker.id] = result } else { failed += 1 }
                 if let failure = result.failure { failures.append(failure) }
                 try await ImportFailureStore.shared.save(name: pack.name, failures: failures)
-                await progress(ImportProgress(completed: previousCount + finished.count, total: total, failed: failed))
-                if next < candidates.count { add(candidates[next]); next += 1 }
+                await progress(ImportProgress(completed: readyCount + finished.count, total: total, failed: failed))
             }
         }
         guard updating || previousCount + finished.count > 0 else { throw StickerImportError.partial(completed: 0, total: total) }

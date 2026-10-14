@@ -10,7 +10,7 @@ nonisolated final class RejectRedirects: NSObject, URLSessionTaskDelegate, @unch
 actor WorkerClient {
     let configuration: WorkerConfiguration
     private let session: URLSession
-    private let gate = RequestGate()
+    private let requests = RequestGate(limit: 6)
     init(configuration: WorkerConfiguration, session: URLSession? = nil) {
         self.configuration = configuration
         if let session { self.session = session } else {
@@ -53,27 +53,43 @@ actor WorkerClient {
         return try Data(contentsOf: file, options: .mappedIfSafe)
     }
     private func requestFile(path: String, variant: String? = nil, refresh: Bool = false) async throws -> URL {
-        try await gate.acquire()
-        defer { Task { await gate.release() } }
         try Task.checkCancellation()
         var components = URLComponents(url: configuration.origin, resolvingAgainstBaseURL: false)!
         components.path = path
         components.queryItems = refresh ? [URLQueryItem(name: "refresh", value: "1")] : variant.map { [URLQueryItem(name: "variant", value: $0)] }
         guard let url = components.url else { throw StickerImportError.invalidConfiguration }
-        for attempt in 0..<3 {
-            do { return try await perform(url) }
-            catch is CancellationError { throw CancellationError() }
-            catch let error as StickerImportError {
-                if case .server(_, let retryable, let delay) = error, retryable, attempt < 2 {
-                    try await Task.sleep(for: .seconds(max(1, min(60, delay))))
-                } else { throw error }
-            } catch let error as URLError {
-                if Task.isCancelled || error.code == .cancelled { throw CancellationError() }
-                guard attempt < 2, [.timedOut, .networkConnectionLost, .cannotConnectToHost].contains(error.code) else {
-                    throw StickerImportError.network
+        for attempt in 0..<6 {
+            try await requests.acquire()
+            do {
+                try await DownloadRequestBudget.shared.wait(asset: path.contains("/assets/"))
+                let file = try await perform(url)
+                await requests.release()
+                return file
+            } catch {
+                await requests.release()
+                if error is CancellationError || Task.isCancelled { throw CancellationError() }
+                let description: String
+                var delay: Double?
+                if case let StickerImportError.server(code, retryable, retryAfter) = error {
+                    description = "서버 \(code) · 재시도 가능 \(retryable)"
+                    if retryable, attempt < 5 {
+                        await DownloadRequestBudget.shared.backOff(seconds: retryAfter)
+                        delay = Double(max(1, retryAfter)) + Double.random(in: 0.2...1.5)
+                    }
+                } else if let network = error as? URLError {
+                    description = "네트워크 \(network.code.rawValue)"
+                    if attempt < 5, [.timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet].contains(network.code) {
+                        delay = min(30, pow(2, Double(attempt + 1))) + Double.random(in: 0.2...1.5)
+                    }
+                } else { description = error.localizedDescription }
+                let action = delay.map { " · \(Int(ceil($0)))초 뒤 자동 재시도 (\(attempt + 1)/6)" } ?? " · 최종 실패"
+                await DownloadDiagnostics.shared.record(path + " · " + description + action)
+                guard let delay else {
+                    if error is URLError { throw StickerImportError.network }
+                    throw error
                 }
-                try await Task.sleep(for: .seconds(attempt + 1))
-            } catch { throw error }
+                try await Task.sleep(for: .seconds(delay))
+            }
         }
         throw StickerImportError.network
     }

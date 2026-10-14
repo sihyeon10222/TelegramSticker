@@ -2,7 +2,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-nonisolated enum StorageOptimizationProfile: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum StorageOptimizationProfile: String, CaseIterable, Identifiable, Sendable, Hashable {
     case balanced, compact
     var id: String { rawValue }
     var pixels: Int { self == .balanced ? 384 : 256 }

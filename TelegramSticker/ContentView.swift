@@ -4,24 +4,19 @@ import UIKit
 struct ContentView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var onboarding = false
+    @Bindable private var imports = ImportActivity.shared
+    @Bindable private var optimizations = OptimizationCenter.shared
     var body: some View {
         TabView {
             Tab("내 스티커 팩", systemImage: "square.stack") { LibraryView() }
-            Tab("설정", systemImage: "keyboard") { SettingsView() }
-        }
-        .safeAreaInset(edge: .bottom) {
-            if let title = BackgroundWork.shared.title {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(title).font(.caption.bold())
-                        Spacer()
-                        Button("중단") { BackgroundWork.shared.cancelCurrent() }.buttonStyle(.glass).font(.caption)
-                    }
-                    ProgressView(value: BackgroundWork.shared.fraction)
-                    Text(BackgroundWork.shared.subtitle).font(.caption2).foregroundStyle(.secondary)
-                }.padding(12).background(.regularMaterial)
+            Tab("설정", systemImage: "keyboard") {
+                SettingsView().safeAreaInset(edge: .bottom, spacing: 0) { CurrentWorkBanner() }
             }
         }
+        .sheet(item: $imports.presentedImport) { session in
+            ImportView(model: session)
+        }
+        .sheet(item: $optimizations.presented) { OptimizationView(model: $0) }
         .sheet(isPresented: $onboarding) {
             OnboardingView {
                 hasCompletedOnboarding = true
@@ -33,8 +28,47 @@ struct ContentView: View {
     }
 }
 
+/// Lives above the tab bar, alongside the library's selection actions.
+struct CurrentWorkBanner: View {
+    var body: some View {
+        if let title = BackgroundWork.shared.title {
+            HStack(spacing: 12) {
+                Button {
+                    if ImportActivity.shared.current?.busy == true { ImportActivity.shared.presentCurrent() }
+                    else { OptimizationCenter.shared.presentCurrent() }
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(title).font(.caption.bold())
+                            Spacer()
+                            if ImportActivity.shared.current?.busy == true || OptimizationCenter.shared.current?.running == true {
+                                Image(systemName: "chevron.up").font(.caption.bold())
+                            }
+                        }
+                        ProgressView(value: BackgroundWork.shared.fraction)
+                        Text(BackgroundWork.shared.subtitle)
+                            .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(ImportActivity.shared.current?.busy != true && OptimizationCenter.shared.current?.running != true)
+                .accessibilityLabel("진행 중인 작업 열기")
+                .accessibilityIdentifier("backgroundWorkDetails")
+                Button("중단") { BackgroundWork.shared.cancelCurrent() }
+                    .buttonStyle(.glass).font(.caption)
+            }
+            .padding(12)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
+            .padding(.horizontal, 12).padding(.bottom, 6)
+        }
+    }
+}
+
 private struct SettingsView: View {
     @State private var practiceText = ""
+    @FocusState private var practiceFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -51,11 +85,15 @@ private struct SettingsView: View {
                 }
                 Section {
                     TextField("여기를 누른 뒤 지구본으로 전환", text: $practiceText)
+                        .focused($practiceFocused)
+                        .submitLabel(.done)
+                        .onSubmit { practiceFocused = false }
                         .accessibilityIdentifier("keyboardPractice")
                 } header: { Text("키보드 전환 연습") } footer: {
                     Text("이 칸에 입력한 내용은 저장하지 않아요.")
                 }
                 Section("저장 공간") { StorageSettingsView() }
+                Section("진단") { NavigationLink("다운로드 로그") { DownloadLogsView() } }
                 Section("앱 정보") {
                     NavigationLink("오픈 소스 라이선스") {
                         ScrollView {
@@ -66,7 +104,15 @@ private struct SettingsView: View {
                     }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("설정")
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("완료") { practiceFocused = false }
+                }
+            }
+            .onDisappear { practiceFocused = false }
         }
     }
 }

@@ -23,19 +23,20 @@ final class BackgroundWork {
     func cancelCurrent() { jobs.values.first?.cancel() }
 
     func begin(title: String, cancel: @escaping @MainActor () -> Void) async -> String? {
+        let identifier = "com.sihyeon.TelegramSticker.work." + UUID().uuidString
+        // Foreground progress and navigation must also work when the OS cannot
+        // grant continued processing (including Simulator).
+        jobs[identifier] = Job(title: title, cancel: cancel)
         #if targetEnvironment(simulator)
         notice = "Simulator에서는 백그라운드 진행 표시를 검증할 수 없어요."
-        return nil
+        return identifier
         #else
-        let identifier = "com.sihyeon.TelegramSticker.work." + UUID().uuidString
-        jobs[identifier] = Job(title: title, cancel: cancel)
         guard BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: .main, launchHandler: { task in
             guard let task = task as? BGContinuedProcessingTask else { task.setTaskCompleted(success: false); return }
             Task { @MainActor in BackgroundWork.shared.attach(task, id: identifier) }
         }) else {
-            jobs.removeValue(forKey: identifier)
             notice = "백그라운드 작업을 등록하지 못했어요. 앱을 열어 두면 계속 진행해요."
-            return nil
+            return identifier
         }
         let request = BGContinuedProcessingTaskRequest(identifier: identifier, title: title, subtitle: "준비 중")
         request.strategy = .fail
@@ -45,9 +46,8 @@ final class BackgroundWork {
             logger.info("Continued processing request accepted")
             return identifier
         } catch {
-            jobs.removeValue(forKey: identifier)
             notice = "현재 iOS가 백그라운드 실행을 허용하지 않아요. 앱을 열어 두면 계속 진행해요. (\((error as NSError).code))"
-            return nil
+            return identifier
         }
         #endif
     }
