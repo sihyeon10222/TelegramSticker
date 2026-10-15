@@ -45,11 +45,11 @@ final class OptimizationSession: Identifiable {
                 .compactMap { $0.telegramName.map { "https://t.me/addstickers/" + $0 } }
         }
     }
-    func removeDrafts() {
+    func removeDrafts(deleteFiles: Bool = true) {
         guard !running else { return }
         let roots = drafts.values.map(\.root)
         drafts.removeAll()
-        Self.discard(roots)
+        if deleteFiles { Self.discard(roots) }
     }
     func selectProfile() {
         guard !running, !finished else { return }

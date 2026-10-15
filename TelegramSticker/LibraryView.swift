@@ -125,7 +125,7 @@ struct LibraryView: View {
                 }
                 if let pending = pack.pendingStickerIDs, !pending.isEmpty {
                     Text("설치 \(pack.stickers.count)/\(pack.originalCount) · 실패 \(pending.count)")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.red)
                         .accessibilityIdentifier("partial.\(pack.id)")
                 }
             }
@@ -265,7 +265,6 @@ struct LibraryView: View {
                     Menu {
                         PackLinkShareMenu(links: PackLinkList.links(for: model.packs), title: "전체 팩 링크 공유")
                         Button("링크 파일 가져오기", systemImage: "doc.badge.plus") { importLinkFile = true }
-                        Text("Telegram 원본 링크가 있는 팩만 공유해요.")
                     } label: { Image(systemName: "ellipsis") }
                     .accessibilityLabel("팩 공유 및 링크 파일 가져오기")
                     .accessibilityIdentifier("packLinkActions")
@@ -386,7 +385,7 @@ private struct InstalledPackView: View {
                 if let pending = pack.pendingStickerIDs, !pending.isEmpty {
                     HStack {
                         Text("\(pack.originalCount)개 중 \(pack.stickers.count)개 설치 · 실패 \(pending.count)개")
-                            .font(.caption).accessibilityIdentifier("installedPartialStatus")
+                            .font(.caption).foregroundStyle(.red).accessibilityIdentifier("installedPartialStatus")
                         Spacer()
                         Button("재시도", action: retry).frame(minWidth: 44, minHeight: 44)
                             .accessibilityLabel("실패한 \(pending.count)개 다시 가져오기")

@@ -7,6 +7,55 @@ nonisolated final class RejectRedirects: NSObject, URLSessionTaskDelegate, @unch
     }
 }
 
+// Shared across previews, batch downloads and updates; concurrent callers reuse one handshake.
+private actor ImportServiceSession {
+    static let shared = ImportServiceSession()
+    private struct Credential: Decodable, Sendable { let token: String; let expiresAt: Double }
+    private var credentials: [URL: Credential] = [:]
+    private var pending: [URL: Task<Credential, Error>] = [:]
+
+    func token(origin: URL, session: URLSession) async throws -> String {
+        if let credential = credentials[origin], credential.expiresAt > Date().timeIntervalSince1970 + 60 {
+            return credential.token
+        }
+        let task: Task<Credential, Error>
+        if let existing = pending[origin] { task = existing }
+        else {
+            task = Task {
+                var request = URLRequest(url: origin.appendingPathComponent("v1/session"))
+                request.httpMethod = "POST"
+                let (file, response) = try await session.download(for: request)
+                defer { try? FileManager.default.removeItem(at: file) }
+                guard let response = response as? HTTPURLResponse else { throw StickerImportError.invalidResponse }
+                guard response.statusCode == 200 else {
+                    throw StickerImportError.server(code: "http_\(response.statusCode)",
+                        retryable: response.statusCode == 429 || response.statusCode >= 500,
+                        retryAfter: Int(response.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 2)
+                }
+                guard (try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max) <= 4096 else {
+                    throw StickerImportError.invalidResponse
+                }
+                let credential = try JSONDecoder().decode(Credential.self, from: Data(contentsOf: file))
+                let remaining = credential.expiresAt - Date().timeIntervalSince1970
+                guard credential.token.hasPrefix("sb1."), credential.token.utf8.count < 256,
+                      credential.token.utf8.allSatisfy({ $0 >= 33 && $0 <= 126 }),
+                      remaining > 0, remaining <= 3700 else { throw StickerImportError.invalidResponse }
+                return credential
+            }
+            pending[origin] = task
+        }
+        do {
+            let credential = try await task.value
+            credentials[origin] = credential
+            pending[origin] = nil
+            return credential.token
+        } catch { pending[origin] = nil; throw error }
+    }
+    func invalidate(origin: URL, token: String) {
+        if credentials[origin]?.token == token { credentials[origin] = nil }
+    }
+}
+
 actor WorkerClient {
     let configuration: WorkerConfiguration
     private let session: URLSession
@@ -98,12 +147,20 @@ actor WorkerClient {
         }
         throw StickerImportError.network
     }
-    private func perform(_ url: URL) async throws -> URL {
+    private func perform(_ url: URL, renewSession: Bool = true) async throws -> URL {
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(configuration.accessKey)", forHTTPHeaderField: "Authorization")
+        let token = configuration.accessKey.isEmpty
+            ? try await ImportServiceSession.shared.token(origin: configuration.origin, session: session)
+            : configuration.accessKey
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (file, response) = try await session.download(for: request)
         guard let response = response as? HTTPURLResponse else {
             try? FileManager.default.removeItem(at: file); throw StickerImportError.invalidResponse
+        }
+        if response.statusCode == 401, configuration.accessKey.isEmpty, renewSession {
+            try? FileManager.default.removeItem(at: file)
+            await ImportServiceSession.shared.invalidate(origin: configuration.origin, token: token)
+            return try await perform(url, renewSession: false)
         }
         let limit = url.path.contains("/assets/") ? 20 * 1024 * 1024 : 2 * 1024 * 1024
         guard (try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max) <= limit else {

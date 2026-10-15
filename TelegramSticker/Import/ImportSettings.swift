@@ -5,16 +5,11 @@ import Security
     private static let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: "com.sihyeon.TelegramSticker.import", kSecAttrAccount as String: "worker"]
     static func load() throws -> WorkerConfiguration? {
-        var q = query
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(q as CFDictionary, &result)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = result as? Data else { throw StickerImportError.invalidConfiguration }
-        let config = try JSONDecoder().decode(WorkerConfiguration.self, from: data)
-        return try WorkerConfiguration(address: config.origin.absoluteString, accessKey: config.accessKey)
+        // Production service uses an automatically acquired, short-lived session.
+        // Legacy Keychain configuration is retained but is no longer required or read.
+        try WorkerConfiguration(address: "https://stickerbridge.stickerbridge-worker.workers.dev", accessKey: "")
     }
+
     static func save(_ config: WorkerConfiguration) throws {
         let data = try JSONEncoder().encode(config)
         let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)

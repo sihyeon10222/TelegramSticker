@@ -17,13 +17,18 @@ struct StorageSettingsView: View {
                 .accessibilityIdentifier("optimizeStorage")
             Spacer(minLength: 0)
             Button("캐시 삭제") {
+                guard ImportActivity.shared.count == 0, OptimizationCenter.shared.current?.running != true else { return }
                 clearing = true
+                // Comparison drafts are disposable. Invalidate UI references before removing files.
+                OptimizationCenter.shared.current?.removeDrafts(deleteFiles: false)
+                OptimizationCenter.shared.current = nil
+                OptimizationCenter.shared.presented = nil
                 Task {
                     defer { clearing = false }
                     do {
                         guard let writer = LibraryWriter.shared else { throw LibraryError.unavailable }
                         try await ImportJobCache.shared.clear(root: jobs, writer: writer)
-                        message = "캐시를 삭제했어요. 설치한 팩과 연결 설정은 유지했어요."
+                        message = "앱 캐시·임시 다운로드·최적화 비교 파일을 정리했어요. 설치한 팩과 설정은 유지했어요."
                     } catch { message = error.localizedDescription }
                     await refresh()
                 }
@@ -75,10 +80,8 @@ struct StorageSettingsView: View {
                     if !keep.contains(relative), (try? reader.file(relative)) != nil { disposable += bytes(revision) }
                 }
             }
-            for job in (try? fm.contentsOfDirectory(at: jobs, includingPropertiesForKeys: nil)) ?? [] {
-                if job.lastPathComponent == "draft.json" { disposable += Int64((try? job.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
-                else if job.lastPathComponent.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil { disposable += bytes(job) }
-            }
+            disposable += bytes(jobs)
+            disposable += AppDisposableCache.bytes()
             return (installed, disposable)
         }.value
         if let values { installed = values.0; disposable = values.1 }

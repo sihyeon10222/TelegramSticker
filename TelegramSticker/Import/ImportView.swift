@@ -1,5 +1,6 @@
 import SwiftUI
 import ImageIO
+import UniformTypeIdentifiers
 
 @MainActor @Observable
 final class ImportActivity {
@@ -12,8 +13,9 @@ final class ImportActivity {
 }
 
 struct AdditionalPackLink: Identifiable {
-    let id = UUID()
-    var value = ""
+    let id: UUID
+    var value: String
+    init(id: UUID = UUID(), value: String = "") { self.id = id; self.value = value }
 }
 struct BatchPackStatus: Identifiable {
     let id: UUID
@@ -25,6 +27,7 @@ struct BatchPackStatus: Identifiable {
 @MainActor @Observable
 final class ImportModel: Identifiable {
     let id = UUID()
+    var primaryLinkID = UUID()
     var link = ""
     var additionalLinks: [AdditionalPackLink] = []
     var batchStatuses: [BatchPackStatus] = []
@@ -54,6 +57,16 @@ final class ImportModel: Identifiable {
     private var backgroundID: String?
     init(writer: LibraryWriter, root: URL? = nil) { coordinator = ImportCoordinator(writer: writer, root: root) }
 
+    var inputLinks: [AdditionalPackLink] { [AdditionalPackLink(id: primaryLinkID, value: link)] + additionalLinks }
+    var failedCount: Int { max(progress?.failed ?? 0, batchCounts.values.reduce(batchLookupFailures) { $0 + $1.failed }) }
+    var progressColor: Color { failedCount > 0 ? .red : (busy ? .blue : (installed ? .green : .blue)) }
+
+    func setInputLinks(_ rows: [AdditionalPackLink]) {
+        guard !busy, let first = rows.first else { return }
+        primaryLinkID = first.id; link = first.value; additionalLinks = Array(rows.dropFirst())
+        pack = nil; installed = false; result = nil
+    }
+
     func configure() async {
         guard !busy else { return }
         pack = nil; progress = nil; installed = false; result = nil; client = nil
@@ -64,7 +77,7 @@ final class ImportModel: Identifiable {
             }
             #endif
             guard let config = try ImportSettings.load() else {
-                message = "먼저 연결 설정에서 가져오기 서버를 설정해 주세요."; client = nil; return
+                message = "가져오기 서비스에 연결할 수 없어요. 다시 시도해 주세요."; client = nil; return
             }
             client = WorkerClient(configuration: config)
             if !updating, let draft = try? await coordinator.batchDraft(for: config.origin), let first = draft.links.first {
@@ -124,7 +137,7 @@ final class ImportModel: Identifiable {
     func downloadBatch() {
         guard !busy, let client else { return }
         guard ImportActivity.shared.count == 0 else { message = "진행 중인 설치·최적화 작업을 먼저 마쳐 주세요."; return }
-        let inputs = ([(id: id, value: link)] + additionalLinks.map { (id: $0.id, value: $0.value) })
+        let inputs = ([(id: primaryLinkID, value: link)] + additionalLinks.map { (id: $0.id, value: $0.value) })
             .flatMap { field in
                 PackLinkList.split(field.value).enumerated().map { offset, value in
                     (id: offset == 0 ? field.id : UUID(), value: value)
@@ -308,8 +321,9 @@ final class ImportModel: Identifiable {
 struct ImportView: View {
     @ScaledMetric(relativeTo: .caption) private var stickerWidth = 64
     @State private var model: ImportModel
-    @State private var settings = false
-    @State private var showLogs = false
+    @State private var importLinkFile = false
+    @State private var deletingLink: UUID?
+    @State private var draggingLink: UUID?
     private let initialPackName: String?
     private let updating: Bool
     private let initialLinks: [String]
@@ -332,17 +346,49 @@ struct ImportView: View {
         initialPackName = nil; updating = model.updating; initialLinks = []
         resumesSession = true
     }
-    // TextField may read/write its binding while SwiftUI is tearing down a deleted row.
-    // Resolve by stable ID each time; never retain an array element/index binding.
-    private func additionalLinkValue(for entry: AdditionalPackLink) -> Binding<String> {
-        let id = entry.id
-        return Binding(
-            get: { model.additionalLinks.first(where: { $0.id == id })?.value ?? entry.value },
+    private func linkValue(for entry: AdditionalPackLink) -> Binding<String> {
+        Binding(
+            get: { model.inputLinks.first(where: { $0.id == entry.id })?.value ?? entry.value },
             set: { value in
-                guard !model.busy, let index = model.additionalLinks.firstIndex(where: { $0.id == id }) else { return }
-                model.additionalLinks[index].value = value
+                guard !model.busy else { return }
+                if entry.id == model.primaryLinkID {
+                    model.link = value; model.pack = nil; model.installed = false; model.result = nil
+                } else if let index = model.additionalLinks.firstIndex(where: { $0.id == entry.id }) {
+                    model.additionalLinks[index].value = value
+                }
             }
         )
+    }
+
+    private func moveLink(to target: UUID) {
+        guard !model.busy, let dragged = draggingLink, dragged != target else { return }
+        var rows = model.inputLinks
+        guard let from = rows.firstIndex(where: { $0.id == dragged }), let to = rows.firstIndex(where: { $0.id == target }) else { return }
+        withAnimation(.smooth(duration: 0.25)) {
+            rows.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+            model.setInputLinks(rows)
+        }
+    }
+
+    private func readLinks(_ result: Result<[URL], Error>) {
+        guard !model.busy else { return }
+        do {
+            guard let url = try result.get().first else { return }
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            let links = try PackLinkList.read(url)
+            let existing = model.inputLinks.filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            model.setInputLinks(existing + links.map { AdditionalPackLink(value: $0) })
+            model.message = "링크 \(links.count)개를 가져왔어요."
+        } catch { model.message = "링크 파일을 열 수 없어요. " + error.localizedDescription }
+    }
+
+    @ViewBuilder
+    private func progressDisplay(_ progress: ImportProgress) -> some View {
+        ProgressView(value: progress.fraction)
+            .tint(progress.failed > 0 ? .red : (progress.completed >= progress.total && progress.total > 0 ? .green : .blue))
+        Text(progress.displayText).font(.caption2.monospacedDigit())
+            .foregroundStyle(progress.failed > 0 ? Color.red : Color.secondary)
     }
 
     private func linkInput(_ value: Binding<String>) -> some View {
@@ -363,20 +409,18 @@ struct ImportView: View {
             ForEach(matches) { item in
                 VStack(alignment: .leading, spacing: 5) {
                     Text(item.title == item.link ? "팩 이름 조회 중" : item.title).font(.subheadline.bold()).lineLimit(2)
-                    Text(item.status).font(.caption).foregroundStyle(item.status.hasPrefix("실패") ? .red : .secondary)
+                    Text(item.status).font(.caption).foregroundStyle(item.status.contains("실패") ? .red : .secondary)
                     if let progress = model.itemProgress(id: item.id) {
-                        ProgressView(value: progress.fraction)
-                        Text(progress.displayText).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                        progressDisplay(progress)
                     }
                 }.padding(.horizontal, 4).padding(.bottom, 8)
             }
-        } else if id == model.id, let pack = model.pack {
+        } else if id == model.primaryLinkID, let pack = model.pack {
             VStack(alignment: .leading, spacing: 5) {
                 Text(pack.title).font(.subheadline.bold())
                 Text("전체 \(pack.stickers.count)개 · 설치 대상 \(pack.installableStickers.count)개").font(.caption).foregroundStyle(.secondary)
                 if let progress = model.progress {
-                    ProgressView(value: progress.fraction)
-                    Text(progress.displayText).font(.caption2.monospacedDigit())
+                    progressDisplay(progress)
                 }
             }.padding(.horizontal, 4)
         }
@@ -389,40 +433,58 @@ struct ImportView: View {
                     if model.busy {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(model.downloadSummary).font(.subheadline.monospacedDigit())
-                            ProgressView(value: BackgroundWork.shared.fraction)
+                                .foregroundStyle(model.failedCount > 0 ? Color.red : Color.secondary)
+                            ProgressView(value: BackgroundWork.shared.fraction).tint(model.progressColor)
                         }
                     }
                     Text("Telegram 공개 팩 링크를 추가하세요.").font(.subheadline).foregroundStyle(.secondary)
-                    HStack {
-                        linkInput(Binding(get: { model.link }, set: { model.link = $0; model.pack = nil; model.installed = false; model.result = nil }))
-                            .accessibilityIdentifier("packLink")
-                            .focused($linkFocused).submitLabel(.go)
-                            .onSubmit { linkFocused = false; if PackLinkList.split(model.link).count > 1 { model.downloadBatch() } else { model.preview() } }
-                        if initialPackName == nil {
-                            Button {
-                                guard !model.additionalLinks.isEmpty else { return }
-                                model.link = model.additionalLinks.removeFirst().value
-                                model.pack = nil; model.installed = false; model.result = nil
-                            } label: {
-                                Image(systemName: "minus.circle").frame(width: 44, height: 44)
-                            }
-                            .disabled(model.additionalLinks.isEmpty)
-                            .accessibilityLabel("링크 삭제")
-                        }
-                    }.disabled(model.busy)
-                    linkStatus(id: model.id, value: model.link)
-                    if initialPackName == nil {
-                        ForEach(model.additionalLinks) { entry in
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    linkInput(additionalLinkValue(for: entry))
-                                    Button { model.additionalLinks.removeAll { $0.id == entry.id } } label: {
+                    ForEach(initialPackName == nil ? model.inputLinks : Array(model.inputLinks.prefix(1))) { entry in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                linkInput(linkValue(for: entry))
+                                    .accessibilityIdentifier(entry.id == model.primaryLinkID ? "packLink" : "packLink.\(entry.id)")
+                                    .focused($linkFocused).submitLabel(.go)
+                                    .onSubmit {
+                                        linkFocused = false
+                                        if model.additionalLinks.isEmpty && PackLinkList.split(model.link).count == 1 { model.preview() }
+                                        else { model.downloadBatch() }
+                                    }
+                                if initialPackName == nil {
+                                    Image(systemName: "line.3.horizontal")
+                                        .foregroundStyle(.secondary).frame(width: 28, height: 44)
+                                        .accessibilityLabel("길게 눌러 링크 순서 변경")
+                                    Button { deletingLink = entry.id } label: {
                                         Image(systemName: "minus.circle").frame(width: 44, height: 44)
                                     }.accessibilityLabel("링크 삭제")
-                                }.disabled(model.busy)
-                                linkStatus(id: entry.id, value: entry.value)
-                            }
+                                    .confirmationDialog("이 링크를 삭제할까요?", isPresented: Binding(
+                                        get: { deletingLink == entry.id },
+                                        set: { if !$0 { deletingLink = nil } }
+                                    ), titleVisibility: .visible) {
+                                        Button("링크 삭제", role: .destructive) {
+                                            let rows = model.inputLinks.filter { $0.id != entry.id }
+                                            model.setInputLinks(rows.isEmpty ? [AdditionalPackLink()] : rows)
+                                            deletingLink = nil
+                                        }
+                                        Button("취소", role: .cancel) { deletingLink = nil }
+                                    }
+                                }
+                            }.disabled(model.busy)
+                            linkStatus(id: entry.id, value: entry.value)
                         }
+                        .onDrag {
+                            guard !model.busy, initialPackName == nil, model.inputLinks.count > 1 else { return NSItemProvider() }
+                            linkFocused = false; draggingLink = entry.id
+                            return NSItemProvider(object: entry.id.uuidString as NSString)
+                        }
+                        .onDrop(of: [.text], delegate: PackLinkReorderDropDelegate(
+                            active: draggingLink != nil && !model.busy,
+                            move: { moveLink(to: entry.id) }, finish: { draggingLink = nil }
+                        ))
+                    }
+                    if initialPackName == nil {
+                        Button("링크 파일 가져오기", systemImage: "doc.badge.plus") { importLinkFile = true }
+                            .buttonStyle(.glass).disabled(model.busy || updating)
+                            .accessibilityIdentifier("importPackLinkFile")
                         Button { model.additionalLinks.append(AdditionalPackLink()) } label: {
                             Label("링크 추가", systemImage: "plus.circle")
                         }.buttonStyle(.glass).disabled(model.busy || updating).accessibilityIdentifier("addPackLink")
@@ -435,16 +497,14 @@ struct ImportView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    Button("다운로드 로그", systemImage: "doc.text.magnifyingglass") { showLogs = true }
-                        .buttonStyle(.glass)
-                    if model.additionalLinks.isEmpty && PackLinkList.split(model.link).count <= 1 {
+                    if model.additionalLinks.isEmpty && PackLinkList.split(model.link).count == 1 {
                     Button { linkFocused = false; model.preview() } label: {
                         Label("팩 미리보기", systemImage: "magnifyingglass").frame(maxWidth: .infinity)
                     }
                         .buttonStyle(.glass).controlSize(.large)
                         .disabled(model.busy || model.client == nil).accessibilityIdentifier("previewPack")
                     }
-                    if let message = model.message { Text(message).font(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("importMessage") }
+                    if let message = model.message { Text(message).font(.subheadline).foregroundStyle(message.contains("실패") || model.failedCount > 0 ? Color.red : Color.secondary).accessibilityIdentifier("importMessage") }
                     if let pack = model.pack, model.additionalLinks.isEmpty && PackLinkList.split(model.link).count <= 1 {
                         if pack.installableStickers.count != pack.stickers.count {
                             Text("마스크·커스텀 이모지 팩은 설치하지 않아요.")
@@ -466,7 +526,7 @@ struct ImportView: View {
                                         Button("이 항목 재시도") { model.download(onlyIDs: [failure.id]) }.disabled(model.busy || model.installed)
                                     }.padding(.vertical, 6)
                                 }
-                            }.accessibilityIdentifier("importFailures")
+                            }.foregroundStyle(.red).accessibilityIdentifier("importFailures")
                         }
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: stickerWidth, maximum: max(stickerWidth, 88)), spacing: 8)], spacing: 8) {
                             ForEach(pack.stickers) { sticker in
@@ -492,10 +552,8 @@ struct ImportView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("닫기") { dismiss() }.accessibilityIdentifier("closeImport") }
-                ToolbarItem(placement: .topBarTrailing) { Button("연결 설정") { settings = true }.disabled(model.busy) }
             }
-            .sheet(isPresented: $showLogs) { NavigationStack { DownloadLogsView() } }
-            .sheet(isPresented: $settings, onDismiss: { Task { await model.configure() } }) { ImportConnectionView() }
+            .fileImporter(isPresented: $importLinkFile, allowedContentTypes: [.stickerBridgeLinks, .plainText], allowsMultipleSelection: false, onCompletion: readLinks)
             .task {
                 guard !resumesSession else { return }
                 model.updating = updating
@@ -509,6 +567,20 @@ struct ImportView: View {
                 }
             }
         }
+    }
+}
+
+private struct PackLinkReorderDropDelegate: DropDelegate {
+    let active: Bool
+    let move: () -> Void
+    let finish: () -> Void
+    func validateDrop(info: DropInfo) -> Bool { active }
+    func dropEntered(info: DropInfo) { if active { move() } }
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: active ? .move : .cancel) }
+    func performDrop(info: DropInfo) -> Bool {
+        guard active else { return false }
+        finish()
+        return true
     }
 }
 
@@ -551,37 +623,6 @@ private struct RemoteStickerPreview: View {
                 guard !Task.isCancelled else { return }
                 image = decoded.map { UIImage(cgImage: $0) }
             } catch { image = nil }
-        }
-    }
-}
-
-private struct ImportConnectionView: View {
-    @State private var address = ""
-    @State private var key = ""
-    @State private var error: String?
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("개인 테스트 서버") {
-                    TextField("https://…workers.dev", text: $address).keyboardType(.URL)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Worker 테스트 접근키", text: $key).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("Bot Token은 서버 Secret에만 저장합니다. 이 화면에는 별도의 테스트 접근키를 입력하세요. 접근키는 이 기기의 Keychain에만 저장돼요.")
-                        .font(.footnote)
-                }
-                if let error { Text(error).foregroundStyle(.red) }
-                Button("저장") {
-                    do {
-                        let config = try WorkerConfiguration(address: address, accessKey: key)
-                        try ImportSettings.save(config); dismiss()
-                    } catch { self.error = error.localizedDescription }
-                }
-            }.navigationTitle("가져오기 연결")
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("닫기") { dismiss() } } }
-                .task {
-                    if let config = try? ImportSettings.load() { address = config.origin.absoluteString; key = config.accessKey }
-                }
         }
     }
 }

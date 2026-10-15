@@ -10,7 +10,7 @@ nonisolated enum StickerImportError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidLink: "https://t.me/addstickers/팩이름 형식의 공개 링크를 입력해 주세요."
-        case .invalidConfiguration: "가져오기 서버의 HTTPS 주소와 테스트 접근키를 확인해 주세요. Bot Token을 입력하는 곳이 아니에요."
+        case .invalidConfiguration: "가져오기 서비스에 연결할 수 없어요. 잠시 후 다시 시도해 주세요."
         case .invalidResponse: "서버 응답을 읽을 수 없어요. 서버 버전과 팩 상태를 확인해 주세요."
         case .unsupportedFormat: "지원 범위 밖이거나 손상된 스티커예요. PNG·WebP, 벡터 TGS, 10초 이하 VP9 WebM을 지원해요."
         case .tooLarge: "외부 서비스의 파일 한도 또는 안전한 디코딩 범위를 초과했어요."
@@ -23,7 +23,7 @@ nonisolated enum StickerImportError: Error, LocalizedError {
         case .importInProgress: "이전 가져오기를 정리하고 있어요. 잠시 후 다시 시도해 주세요."
         case .server(let code, _, _):
             switch code {
-            case "unauthorized": "접근키가 올바르지 않아요. 연결 설정을 확인해 주세요."
+            case "unauthorized": "가져오기 서비스 인증이 만료됐어요. 다시 시도해 주세요."
             case "pack_unavailable", "asset_unavailable": "공개 팩이나 파일에 접근할 수 없어요. 링크를 확인해 주세요."
             case "server_not_configured": "가져오기 서버 설정이 아직 준비되지 않았어요."
             case "rate_limited", "upstream_rate_limited": "요청이 많아 잠시 기다려야 해요. 잠시 후 다시 시도해 주세요."
@@ -60,7 +60,7 @@ nonisolated struct WorkerConfiguration: Codable, Sendable {
         guard let c = URLComponents(string: address.trimmingCharacters(in: .whitespacesAndNewlines)),
               c.scheme == "https", let host = c.host, !host.isEmpty, c.user == nil, c.password == nil,
               c.port == nil, c.query == nil, c.fragment == nil, ["", "/"].contains(c.path),
-              let url = c.url, (24...256).contains(accessKey.utf8.count),
+              let url = c.url, (accessKey.isEmpty || (24...256).contains(accessKey.utf8.count)),
               accessKey.utf8.allSatisfy({ $0 >= 33 && $0 <= 126 }), !accessKey.contains(":") else {
             throw StickerImportError.invalidConfiguration
         }

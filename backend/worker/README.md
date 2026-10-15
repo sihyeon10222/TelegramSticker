@@ -48,3 +48,23 @@ Worker 소스는 `BOT_TOKEN`과 `ACCESS_KEY` Secret을 요구합니다. 로컬 u
 - 서버는 형식별 헤더를 판별하고, 실제 이미지·영상 프레임·픽셀·디코딩 검증은 앱에서 수행합니다.
 
 공식 자료: [Telegram Bot API](https://core.telegram.org/bots/api), [Cloudflare Secrets](https://developers.cloudflare.com/workers/configuration/secrets/), [Rate limiting](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/), [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/).
+
+
+## 설정 없는 앱 연결 (2026-10-15)
+
+일반 사용자는 서버 주소/접근키를 입력하지 않습니다. 앱은 고정된 운영 HTTPS 원점의
+`POST /v1/session`에서 1시간짜리 HMAC 서명 이용 토큰을 자동 발급받습니다.
+앱 프로세스 안에서 동시 요청의 토큰 발급을 공유하고, 만료 전에 갱신하며 401이면 한 번 재발급합니다.
+Bot Token 및 기존 ACCESS_KEY는 앱에 포함하지 않습니다. 기존 수동 연결 Keychain 데이터는
+읽지 않으며 사용자 설치 팩은 변경하지 않습니다.
+
+`PUBLIC_IMPORT_ENABLED=true`는 로그인 없는 공개 서비스 모드입니다. 세션 발급과 팩 조회는
+기존 IP별 PACK_LIMIT, 이미지 조회는 ASSET_LIMIT을 적용합니다. 임의 파일 프록시는 허용하지 않습니다.
+이 세션은 앱의 진위를 증명하는 인증이 아닙니다. 누구나 같은 공개 세션 API를 호출할 수 있고,
+IP별 제한도 분산 남용이나 전역 비용 상한을 보장하지 않습니다. App Attest는 아직 구현하지 않았습니다.
+공개 배포 전 운영 사용량/비용 제한 및 필요 시 App Attest를 별도로 준비해야 합니다.
+긴급 차단하려면 PUBLIC_IMPORT_ENABLED를 false로 바꿉니다. 기존 ACCESS_KEY 인증 경로는 유지됩니다.
+ACCESS_KEY 교체 시 기존 세션은 무효화되며 앱이 새 세션을 발급받습니다.
+
+이번 변경의 확인 범위: Simulator 앱 빌드와 TypeScript 타입 검사. 테스트 및 실제 신규 설치
+가져오기 흐름은 실행하지 않았습니다.

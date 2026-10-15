@@ -52,8 +52,10 @@ struct CurrentWorkBanner: View {
                             }
                         }
                         ProgressView(value: BackgroundWork.shared.fraction)
+                            .tint(ImportActivity.shared.current?.busy == true ? ImportActivity.shared.current?.progressColor ?? .blue : .blue)
                         Text(BackgroundWork.shared.subtitle)
-                            .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(ImportActivity.shared.current?.busy == true && (ImportActivity.shared.current?.failedCount ?? 0) > 0 ? Color.red : Color.secondary)
                             .lineLimit(2)
                     }
                     .contentShape(Rectangle())

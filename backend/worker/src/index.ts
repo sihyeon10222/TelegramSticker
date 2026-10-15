@@ -1,6 +1,6 @@
 // No runtime packages. Secrets are provided only through Worker bindings.
 interface Limiter { limit(options: { key: string }): Promise<{ success: boolean }> }
-interface Env { BOT_TOKEN: string; ACCESS_KEY: string; PACK_LIMIT: Limiter; ASSET_LIMIT: Limiter }
+interface Env { BOT_TOKEN: string; ACCESS_KEY: string; PUBLIC_IMPORT_ENABLED?: string; PACK_LIMIT: Limiter; ASSET_LIMIT: Limiter }
 interface WorkerCache { match(key: Request): Promise<Response | undefined>; put(key: Request, value: Response): Promise<void> }
 interface Context { waitUntil(promise: Promise<unknown>): void }
 interface Runtime { fetch: typeof fetch; cache?: WorkerCache }
@@ -35,6 +35,29 @@ async function authorized(request: Request, key: string): Promise<boolean> {
   let difference = 0;
   for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return difference === 0;
+}
+// Public, rate-limited sessions are not proof of app integrity. No provider secret leaves the Worker.
+async function sessionKey(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey('raw', new TextEncoder().encode(`stickerbridge-session-v1:${secret}`),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+}
+function hex(bytes: ArrayBuffer): string {
+  return [...new Uint8Array(bytes)].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+async function issueSession(secret: string): Promise<{ token: string; expiresAt: number }> {
+  const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+  const payload = `sb1.${expiresAt}.${crypto.randomUUID()}`;
+  const signature = await crypto.subtle.sign('HMAC', await sessionKey(secret), new TextEncoder().encode(payload));
+  return { token: `${payload}.${hex(signature)}`, expiresAt };
+}
+async function validSession(request: Request, secret: string): Promise<boolean> {
+  const value = request.headers.get('authorization') ?? '';
+  const match = /^Bearer (sb1\.([0-9]{10})\.[0-9a-f-]{36})\.([0-9a-f]{64})$/.exec(value);
+  if (!match) return false;
+  const remaining = Number(match[2]) - Math.floor(Date.now() / 1000);
+  if (remaining <= 0 || remaining > 3600) return false;
+  const signature = Uint8Array.from(match[3].match(/../g)!, byte => parseInt(byte, 16));
+  return crypto.subtle.verify('HMAC', await sessionKey(secret), signature, new TextEncoder().encode(match[1]));
 }
 function json(value: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(value), { status, headers: {
@@ -134,8 +157,19 @@ export function createHandler(runtime: Runtime) {
           !boundedString(env.ACCESS_KEY, 256) || env.ACCESS_KEY.length < 24 || !env.PACK_LIMIT || !env.ASSET_LIMIT) {
         throw new APIError(503, 'server_not_configured');
       }
+      const publicSessions = env.PUBLIC_IMPORT_ENABLED === 'true';
+      if (new URL(request.url).pathname === '/v1/session') {
+        stage = 'session';
+        if (!publicSessions || request.method !== 'POST' || new URL(request.url).search) {
+          throw new APIError(400, 'invalid_request');
+        }
+        const key = request.headers.get('cf-connecting-ip') ?? 'local';
+        if (!(await env.PACK_LIMIT.limit({ key })).success) throw new APIError(429, 'rate_limited', true, 60);
+        return json(await issueSession(env.ACCESS_KEY));
+      }
       stage = 'authentication';
-      if (!(await authorized(request, env.ACCESS_KEY))) throw new APIError(401, 'unauthorized');
+      if (!(await authorized(request, env.ACCESS_KEY)) &&
+          !(publicSessions && await validSession(request, env.ACCESS_KEY))) throw new APIError(401, 'unauthorized');
       if (request.method !== 'GET') throw new APIError(405, 'method_not_allowed');
       const url = new URL(request.url);
       const match = /^\/v1\/packs\/([A-Za-z0-9_]{1,64})(?:\/assets\/([a-f0-9]{64}))?$/.exec(url.pathname);
