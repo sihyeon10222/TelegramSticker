@@ -71,8 +71,10 @@ final class GIFPlaybackView: UIImageView {
     private var task: Task<Void, Never>?
     private var generation = UUID()
     private var pixels = 96
+    private var repeatForever = false
     var playbackPaused = false
-    func configure(url: URL?, poster: UIImage?, pixels: Int = 96) {
+    func configure(url: URL?, poster: UIImage?, pixels: Int = 96, repeatForever: Bool = false) {
+        self.repeatForever = repeatForever
         // willDisplay can run again for an unchanged cell during host transitions.
         // Keep the current decoded frame and timeline instead of flashing the poster.
         if let url, self.url == url, self.pixels == pixels, timeline != nil || task != nil {
@@ -119,7 +121,9 @@ final class GIFPlaybackView: UIImageView {
     fileprivate func tick(_ time: Double) {
         guard !playbackPaused, isPlaybackVisible,
               let url, let timeline, task == nil else { return }
-        let index = UIAccessibility.isReduceMotionEnabled ? 0 : timeline.frame(at: max(0, time - started))
+        let elapsed = max(0, time - started)
+        let playbackTime = repeatForever && timeline.duration > 0 ? elapsed.truncatingRemainder(dividingBy: timeline.duration) : elapsed
+        let index = UIAccessibility.isReduceMotionEnabled ? 0 : timeline.frame(at: playbackTime)
         guard index != shown else { return }
         let generation = generation, pixels = pixels
         task = Task { [weak self] in

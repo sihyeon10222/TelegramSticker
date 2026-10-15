@@ -337,7 +337,6 @@ private struct PackImportRequest: Identifiable { let id = UUID(); let name: Stri
 private struct SharedPNG: Identifiable { let id = UUID(); let data: Data; var type = "public.png" }
 
 private struct InstalledPackView: View {
-    @ScaledMetric(relativeTo: .subheadline) private var stickerWidth = 64
     @ScaledMetric(relativeTo: .body) private var previewHeight = 180
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -355,9 +354,27 @@ private struct InstalledPackView: View {
     @State private var confirmDelete = false
     @State private var selecting = false
     @State private var selectedStickers = Set<String>()
+    @State private var columnCount = 5
+    @State private var pinchStartColumns: Int?
+
+    private var gridZoom: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let startingColumns = pinchStartColumns ?? columnCount
+                pinchStartColumns = startingColumns
+                let columns = min(10, max(2, Int((Double(startingColumns) / value.magnification).rounded())))
+                guard columns != columnCount else { return }
+                withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.32, dampingFraction: 0.86)) {
+                    columnCount = columns
+                }
+            }
+            .onEnded { _ in pinchStartColumns = nil }
+    }
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        GeometryReader { geometry in
+        let cellWidth = max(1, (geometry.size.width - 24 - CGFloat(columnCount - 1) * 4) / CGFloat(columnCount))
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
@@ -378,7 +395,7 @@ private struct InstalledPackView: View {
                     .padding(.horizontal, 12)
                     .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                 }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: stickerWidth, maximum: max(stickerWidth, 88)), spacing: 8)], spacing: 8) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columnCount), spacing: 4) {
                     ForEach(stickers) { sticker in
                         Button {
                             if selecting {
@@ -386,11 +403,15 @@ private struct InstalledPackView: View {
                             } else { preview = sticker }
                         } label: {
                             Group {
-                                if let image = images.thumbnail(for: sticker) {
+                                if sticker.animationURL != nil {
+                                    StickerLargePreview(sticker: sticker)
+                                        .accessibilityHidden(true)
+                                        .allowsHitTesting(false)
+                                } else if let image = images.thumbnail(for: sticker) {
                                     Image(uiImage: image).resizable().scaledToFit()
                                 } else { Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary) }
                             }
-                            .padding(8).frame(maxWidth: .infinity).frame(height: stickerWidth)
+                            .padding(3).frame(maxWidth: .infinity).frame(height: cellWidth)
                             .background(copiedID == sticker.id ? Color.accentColor.opacity(0.12) : Color(uiColor: .tertiarySystemFill).opacity(0.35),
                                         in: RoundedRectangle(cornerRadius: 10))
                             .overlay(alignment: .topTrailing) {
@@ -423,9 +444,11 @@ private struct InstalledPackView: View {
                         }
                     }
                 }
-            }.padding(16)
+            }.padding(.horizontal, 12).padding(.vertical, 8)
         }
-        .navigationTitle(pack.title)
+        .simultaneousGesture(gridZoom)
+        }
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if pack.telegramName != nil {
@@ -454,37 +477,46 @@ private struct InstalledPackView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if let preview {
-                VStack(spacing: 8) {
-                    StickerLargePreview(sticker: preview)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: min(280, previewHeight + (horizontalSizeClass == .regular ? 40 : 0)))
-                        .clipped()
-                        .id(preview.id)
-                        .transition(.opacity)
-                    if let record = pack.stickers.first(where: { preview.id == pack.id + "." + $0.id }), let quality = record.conversionQuality {
-                        Text(quality.hasPrefix("용량 최적화") ? quality : "자동 품질 조절 · \(quality)").font(.caption).foregroundStyle(.secondary)
-                    }
-                    GlassEffectContainer(spacing: 12) {
-                        HStack(spacing: 8) {
-                            Button("최적화") { optimize([preview.id]) }.buttonStyle(.glass)
-                                .disabled(ImportActivity.shared.count > 0)
-                            Button("복사") { copy(preview) }.buttonStyle(.glassProminent).accessibilityIdentifier("previewCopy")
-                            Button("공유", systemImage: "square.and.arrow.up") { share(preview, animated: preview.animationURL != nil) }.buttonStyle(.glass)
-                            Button("닫기") { self.preview = nil }.buttonStyle(.glass).accessibilityIdentifier("previewClose")
+            VStack(alignment: .leading, spacing: 0) {
+                Text(pack.title)
+                    .font(.title2.bold())
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .accessibilityAddTraits(.isHeader)
+                if let preview {
+                    VStack(spacing: 8) {
+                        StickerLargePreview(sticker: preview)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: min(280, previewHeight + (horizontalSizeClass == .regular ? 40 : 0)))
+                            .clipped()
+                            .id(preview.id)
+                            .transition(.opacity)
+                        if let record = pack.stickers.first(where: { preview.id == pack.id + "." + $0.id }), let quality = record.conversionQuality {
+                            Text(quality.hasPrefix("용량 최적화") ? quality : "자동 품질 조절 · \(quality)").font(.caption).foregroundStyle(.secondary)
                         }
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .font(.subheadline)
+                        GlassEffectContainer(spacing: 12) {
+                            HStack(spacing: 8) {
+                                Button("최적화") { optimize([preview.id]) }.buttonStyle(.glass)
+                                    .disabled(ImportActivity.shared.count > 0)
+                                Button("복사") { copy(preview) }.buttonStyle(.glassProminent).accessibilityIdentifier("previewCopy")
+                                Button("공유", systemImage: "square.and.arrow.up") { share(preview, animated: preview.animationURL != nil) }.buttonStyle(.glass)
+                                Button("닫기") { self.preview = nil }.buttonStyle(.glass).accessibilityIdentifier("previewClose")
+                            }
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .font(.subheadline)
+                        }
                     }
+                    .controlSize(.regular)
+                    .buttonBorderShape(.capsule)
+                    .padding(16)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                 }
-                .controlSize(.regular)
-                .buttonBorderShape(.capsule)
-                .padding(16)
-                .frame(maxWidth: .infinity)
-                .background(Color(uiColor: .secondarySystemBackground))
-                .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
             }
+            .background(Color(uiColor: .systemBackground))
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.18) : .spring(response: 0.38, dampingFraction: 0.86), value: preview?.id)
     }

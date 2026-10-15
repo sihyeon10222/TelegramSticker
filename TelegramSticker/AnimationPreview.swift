@@ -26,7 +26,7 @@ struct StickerLargePreview: UIViewRepresentable {
         guard context.coordinator.id != renderingID else { return }
         context.coordinator.id = renderingID
         context.coordinator.task?.cancel()
-        view.configure(url: sticker.animationURL, poster: nil, pixels: pixels)
+        view.configure(url: sticker.animationURL, poster: nil, pixels: pixels, repeatForever: true)
         let id = renderingID, url = sticker.fileURL()
         context.coordinator.task = Task { @MainActor [weak view] in
             let image = await Task.detached { () -> CGImage? in
