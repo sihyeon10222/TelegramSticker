@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 import CoreTransferable
 
 extension UTType {
-    static let stickerBridgeLinks = UTType(exportedAs: "com.sihyeon.TelegramSticker.pack-links", conformingTo: .plainText)
+    nonisolated static let stickerBridgeLinks = UTType(exportedAs: "com.sihyeon.TelegramSticker.pack-links", conformingTo: .plainText)
 }
 
 nonisolated struct StickerLinkFile: Transferable {

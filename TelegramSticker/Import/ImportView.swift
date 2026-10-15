@@ -332,6 +332,27 @@ struct ImportView: View {
         initialPackName = nil; updating = model.updating; initialLinks = []
         resumesSession = true
     }
+    // TextField may read/write its binding while SwiftUI is tearing down a deleted row.
+    // Resolve by stable ID each time; never retain an array element/index binding.
+    private func additionalLinkValue(for entry: AdditionalPackLink) -> Binding<String> {
+        let id = entry.id
+        return Binding(
+            get: { model.additionalLinks.first(where: { $0.id == id })?.value ?? entry.value },
+            set: { value in
+                guard !model.busy, let index = model.additionalLinks.firstIndex(where: { $0.id == id }) else { return }
+                model.additionalLinks[index].value = value
+            }
+        )
+    }
+
+    private func linkInput(_ value: Binding<String>) -> some View {
+        TextField("https://t.me/addstickers/…", text: value, axis: .vertical)
+            .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+            .lineLimit(1...5)
+            .textFieldStyle(.plain).padding(12).frame(minHeight: 44)
+            .background(Color(uiColor: .tertiarySystemFill).opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+    }
+
     @ViewBuilder
     private func linkStatus(id: UUID, value: String) -> some View {
         let entries = PackLinkList.split(value)
@@ -371,29 +392,30 @@ struct ImportView: View {
                             ProgressView(value: BackgroundWork.shared.fraction)
                         }
                     }
-                    if model.pack == nil {
-                        Text("Telegram 공개 팩 링크를 추가하세요.").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    TextField("https://t.me/addstickers/…", text: Binding(get: { model.link }, set: { model.link = $0; model.pack = nil; model.installed = false; model.result = nil }), axis: .vertical)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                        .lineLimit(1...5)
-                        .textFieldStyle(.plain).padding(.horizontal, 12).frame(minHeight: 44)
-                        .background(Color(uiColor: .tertiarySystemFill).opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-                        .accessibilityIdentifier("packLink")
-                        .disabled(model.busy)
-                        .focused($linkFocused).submitLabel(.go)
-                        .onSubmit { linkFocused = false; if PackLinkList.split(model.link).count > 1 { model.downloadBatch() } else { model.preview() } }
-                    if initialPackName == nil {
-                        Text("공유받은 링크 여러 개를 이 칸에 한 번에 붙여넣어도 돼요.").font(.caption).foregroundStyle(.secondary)
-                    }
+                    Text("Telegram 공개 팩 링크를 추가하세요.").font(.subheadline).foregroundStyle(.secondary)
+                    HStack {
+                        linkInput(Binding(get: { model.link }, set: { model.link = $0; model.pack = nil; model.installed = false; model.result = nil }))
+                            .accessibilityIdentifier("packLink")
+                            .focused($linkFocused).submitLabel(.go)
+                            .onSubmit { linkFocused = false; if PackLinkList.split(model.link).count > 1 { model.downloadBatch() } else { model.preview() } }
+                        if initialPackName == nil {
+                            Button {
+                                guard !model.additionalLinks.isEmpty else { return }
+                                model.link = model.additionalLinks.removeFirst().value
+                                model.pack = nil; model.installed = false; model.result = nil
+                            } label: {
+                                Image(systemName: "minus.circle").frame(width: 44, height: 44)
+                            }
+                            .disabled(model.additionalLinks.isEmpty)
+                            .accessibilityLabel("링크 삭제")
+                        }
+                    }.disabled(model.busy)
                     linkStatus(id: model.id, value: model.link)
                     if initialPackName == nil {
-                        ForEach($model.additionalLinks) { $entry in
+                        ForEach(model.additionalLinks) { entry in
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
-                                    TextField("https://t.me/addstickers/…", text: $entry.value)
-                                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                                        .padding(12).background(Color(uiColor: .tertiarySystemFill).opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+                                    linkInput(additionalLinkValue(for: entry))
                                     Button { model.additionalLinks.removeAll { $0.id == entry.id } } label: {
                                         Image(systemName: "minus.circle").frame(width: 44, height: 44)
                                     }.accessibilityLabel("링크 삭제")
