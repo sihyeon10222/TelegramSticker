@@ -6,10 +6,6 @@
 	<array>
 		<string>com.sihyeon.TelegramSticker.work.*</string>
 	</array>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>processing</string>
-	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -25,17 +21,21 @@
 			</array>
 		</dict>
 	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>processing</string>
+	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>com.sihyeon.TelegramSticker.pack-links</string>
-			<key>UTTypeDescription</key>
-			<string>StickerBridge Pack Links</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.plain-text</string>
 			</array>
+			<key>UTTypeDescription</key>
+			<string>StickerBridge Pack Links</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.sihyeon.TelegramSticker.pack-links</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>

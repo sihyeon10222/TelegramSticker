@@ -1,0 +1,290 @@
+import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
+
+struct InstalledPackView: View {
+    @Environment(\.activeAppTab) private var activeTab
+    @ScaledMetric(relativeTo: .body) private var previewHeight = 180
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let pack: PackManifestV1
+    let stickers: [Sticker]
+    let update: () -> Void
+    let retry: () -> Void
+    let optimize: (Set<String>) -> Void
+    let delete: () async -> Void
+    @State private var images = StickerImages()
+    @State private var status = "스티커를 탭하면 크게 볼 수 있어요."
+    @State private var copiedID: String?
+    @State private var sharedPNG: SharedPNG?
+    @State private var preview: Sticker?
+    @State private var permissionWarning = false
+    @State private var confirmDelete = false
+    @State private var confirmStickerDelete = false
+    @State private var selecting = false
+    @State private var selectedStickers = Set<String>()
+    @State private var columnCount = 4
+    @State private var pinchStartColumns: Int?
+    @State private var storageBytes: Int64?
+
+    private var gridZoom: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let startingColumns = pinchStartColumns ?? columnCount
+                pinchStartColumns = startingColumns
+                let columns = min(10, max(2, Int((Double(startingColumns) / value.magnification).rounded())))
+                guard columns != columnCount else { return }
+                withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.32, dampingFraction: 0.86)) {
+                    columnCount = columns
+                }
+            }
+            .onEnded { _ in pinchStartColumns = nil }
+    }
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        GeometryReader { geometry in
+        let cellWidth = max(1, (geometry.size.width - 24 - CGFloat(columnCount - 1) * 4) / CGFloat(columnCount))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(pack.stickers.count)개").font(.subheadline.weight(.semibold))
+                    if let storageBytes {
+                        Text(ByteCountFormatter.string(fromByteCount: storageBytes, countStyle: .file))
+                            .font(.caption).foregroundStyle(.secondary)
+                            .accessibilityLabel("팩 저장 용량 \(ByteCountFormatter.string(fromByteCount: storageBytes, countStyle: .file))")
+                    }
+                    Spacer()
+                    Text(status).font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("installedCopyStatus")
+                }
+                if let pending = pack.pendingStickerIDs, !pending.isEmpty {
+                    HStack {
+                        Text("\(pack.originalCount)개 중 \(pack.stickers.count)개 설치 · 실패 \(pending.count)개")
+                            .font(.caption).foregroundStyle(.red).accessibilityIdentifier("installedPartialStatus")
+                        Spacer()
+                        Button("재시도", action: retry).frame(minWidth: 44, minHeight: 44)
+                            .accessibilityLabel("실패한 \(pending.count)개 다시 가져오기")
+                            .accessibilityIdentifier("retryMissingStickers")
+                    }
+                    .padding(.horizontal, 12)
+                    .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columnCount), spacing: 4) {
+                    ForEach(stickers) { sticker in
+                        Button {
+                            if selecting {
+                                if !selectedStickers.insert(sticker.id).inserted { selectedStickers.remove(sticker.id) }
+                            } else { preview = preview?.id == sticker.id ? nil : sticker }
+                        } label: {
+                            Group {
+                                if sticker.animationURL != nil {
+                                    StickerLargePreview(sticker: sticker)
+                                        .accessibilityHidden(true)
+                                        .allowsHitTesting(false)
+                                } else if let image = images.thumbnail(for: sticker) {
+                                    Image(uiImage: image).resizable().scaledToFit()
+                                } else { Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary) }
+                            }
+                            .padding(3).frame(maxWidth: .infinity).frame(height: cellWidth)
+                            .background(copiedID == sticker.id ? Color.accentColor.opacity(0.12) : Color(uiColor: .tertiarySystemFill).opacity(0.35),
+                                        in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(alignment: .topTrailing) {
+                                if selecting {
+                                    Image(systemName: selectedStickers.contains(sticker.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(Color.accentColor).padding(3).background(.background, in: Circle())
+                                }
+                            }
+                            .overlay(alignment: .bottomTrailing) {
+                                if sticker.animationURL != nil {
+                                    Text("GIF").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
+                                        .padding(.horizontal, 4).padding(.vertical, 2)
+                                        .background(.background, in: Capsule()).padding(3)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(sticker.animationURL == nil ? sticker.name : "\(sticker.name), 애니메이션")
+                        .accessibilityHint("다시 탭하면 미리보기를 닫아요. 길게 누르면 복사와 공유를 할 수 있어요.")
+                        .accessibilityIdentifier("installedCopy.\(sticker.id)")
+                        .contextMenu {
+                            Button("복사", systemImage: "doc.on.doc") { copy(sticker) }
+                            Button("공유", systemImage: "square.and.arrow.up") { share(sticker, animated: sticker.animationURL != nil) }
+                        }
+                    }
+                }
+            }.padding(.horizontal, 12).padding(.vertical, 8)
+        }
+        .simultaneousGesture(gridZoom)
+        }
+        .onDisappear { resetSelection() }
+        .onChange(of: activeTab) { _, tab in
+            if tab != .library { resetSelection() }
+        }
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(id: "stickerSelection", placement: .topBarLeading) {
+                Button {
+                    withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35)) {
+                        selecting.toggle(); selectedStickers.removeAll(); preview = nil
+                    }
+                } label: {
+                    Text(selecting ? "완료" : "선택").lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            if selecting {
+                ToolbarSpacer(.fixed, placement: .topBarLeading)
+                ToolbarItem(id: "stickerSelectAll", placement: .topBarLeading) {
+                    Button {
+                        let all = Set(stickers.map(\.id))
+                        selectedStickers = selectedStickers == all ? [] : all
+                    } label: {
+                        Text(!stickers.isEmpty && selectedStickers == Set(stickers.map(\.id)) ? "전체 해제" : "전체 선택")
+                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    }.disabled(stickers.isEmpty)
+                }
+            }
+            if !selecting {
+                ToolbarItem(placement: .topBarTrailing) {
+                    ShareLink(item: PackLinkList.links(for: [pack]).joined(separator: "\n")) {
+                        Label("Sticker Pack 링크 공유", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(PackLinkList.links(for: [pack]).isEmpty)
+                    .labelStyle(.iconOnly).accessibilityIdentifier("sharePackLink")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    if pack.telegramName != nil {
+                        Button("업데이트 확인", systemImage: "arrow.clockwise", action: update)
+                            .disabled(selecting || ImportActivity.shared.count > 0)
+                            .accessibilityIdentifier("updatePack")
+                    }
+                    Button(selecting ? "선택한 \(selectedStickers.count)개 용량 최적화" : "용량 최적화", systemImage: "slider.horizontal.3") {
+                        optimize(selecting ? selectedStickers : [])
+                    }
+                    .disabled(ImportActivity.shared.count > 0 || (selecting && selectedStickers.isEmpty))
+                    .accessibilityIdentifier("optimizePack")
+                    if selecting {
+                        Button("선택한 스티커 삭제", systemImage: "trash", role: .destructive) { confirmStickerDelete = true }
+                            .disabled(selectedStickers.isEmpty || ImportActivity.shared.count > 0)
+                    }
+                } label: { Label("옵션", systemImage: "ellipsis") }
+                    .labelStyle(.iconOnly).accessibilityIdentifier("packOptions")
+            }
+            if !selecting {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("팩 삭제", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                        .accessibilityIdentifier("deletePack")
+                }
+            }
+        }
+        .alert("키보드 전체 접근을 확인해 주세요", isPresented: $permissionWarning) {
+            Button("설정 열기") {
+                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+            }
+            Button("확인", role: .cancel) {}
+        } message: { Text("앱에서 복사는 가능하지만, 키보드에서 복사하려면 전체 접근이 필요해요. 설정 → StickerBridge → 키보드에서 허용하고 키보드를 한 번 열어 주세요.") }
+        .confirmationDialog("이 팩을 삭제할까요?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("팩 삭제", role: .destructive) { Task { await delete(); dismiss() } }
+        }
+        .confirmationDialog("선택한 \(selectedStickers.count)개 스티커를 삭제할까요?", isPresented: $confirmStickerDelete, titleVisibility: .visible) {
+            Button("선택한 스티커 삭제", role: .destructive) {
+                let ids = Set(pack.stickers.filter { selectedStickers.contains(pack.id + "." + $0.id) }.map(\.id))
+                Task {
+                    do {
+                        guard let writer = LibraryWriter.shared else { throw LibraryError.unavailable }
+                        try await writer.deleteStickers(packID: pack.id, revision: pack.revision, ids: ids)
+                        ImportActivity.shared.libraryChangeID += 1
+                        selectedStickers.removeAll()
+                        preview = nil
+                    } catch { status = error.localizedDescription }
+                }
+            }
+        }
+        .sheet(item: $sharedPNG) { PNGShareSheet(data: $0.data, type: $0.type).presentationDetents([.medium, .large]) }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(pack.title)
+                    .font(.title2.bold())
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .accessibilityAddTraits(.isHeader)
+                    .background(Color(uiColor: .systemBackground))
+                if let preview {
+                    VStack(spacing: 8) {
+                        StickerLargePreview(sticker: preview)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: min(280, previewHeight + (horizontalSizeClass == .regular ? 40 : 0)))
+                            .clipped()
+                            .id(preview.id)
+                            .transition(.opacity)
+                        if let record = pack.stickers.first(where: { preview.id == pack.id + "." + $0.id }), let quality = record.conversionQuality {
+                            Text(quality.hasPrefix("용량 최적화") ? quality : "자동 품질 조절 · \(quality)").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .onTapGesture { self.preview = nil }
+                    .contextMenu {
+                        Button("복사", systemImage: "doc.on.doc") { copy(preview) }
+                        Button("공유", systemImage: "square.and.arrow.up") { share(preview, animated: preview.animationURL != nil) }
+                    }
+                    .controlSize(.regular)
+                    .buttonBorderShape(.capsule)
+                    .padding(16)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(uiColor: .systemBackground))
+                    .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                }
+            }
+        }
+        .animation(reduceMotion ? .easeInOut(duration: 0.18) : .spring(response: 0.38, dampingFraction: 0.86), value: preview?.id)
+        .task(id: pack.revision) {
+            let pack = pack
+            let bytes = await Task.detached(priority: .utility) { () -> Int64? in
+                guard let reader = try? LibraryReader.shared() else { return nil }
+                var paths = Set(pack.stickers.flatMap { record in
+                    [record.pngPath, record.thumbnailPath] + [record.animationPath, record.playbackPath].compactMap { $0 }
+                })
+                paths.insert("packs/\(pack.id)/\(pack.revision)/manifest.json")
+                var checkedDirectories = Set<String>()
+                var total: Int64 = 0
+                for path in paths {
+                    guard let url = try? reader.file(path, checkedDirectories: &checkedDirectories),
+                          let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                          values.isRegularFile == true, let size = values.fileSize else { continue }
+                    total += Int64(size)
+                }
+                return total
+            }.value
+            guard !Task.isCancelled else { return }
+            storageBytes = bytes
+        }
+    }
+
+    private func copy(_ sticker: Sticker, asPNG: Bool = false) {
+        permissionWarning = KeyboardAccessReceipt.lastAllowed == nil
+        let result = StickerCopyService().copy(sticker, isAllowed: true, asPNG: asPNG)
+        if result == .copied { copiedID = sticker.id }
+        status = result.message
+        UIAccessibility.post(notification: .announcement, argument: status)
+    }
+
+    private func share(_ sticker: Sticker, animated: Bool) {
+        do {
+            guard let url = animated ? sticker.animationURL : sticker.fileURL() else { throw LibraryError.invalidImage }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            guard animated ? GIFValidation.isValid(data) : PNGValidation.isValid(data) else { throw LibraryError.invalidImage }
+            sharedPNG = SharedPNG(data: data, type: animated ? "com.compuserve.gif" : "public.png")
+        } catch { status = "이미지를 공유할 수 없어요. 팩을 다시 확인해 주세요." }
+    }
+    private func resetSelection() {
+        selecting = false
+        selectedStickers.removeAll()
+        confirmDelete = false
+        confirmStickerDelete = false
+        preview = nil
+    }
+
+}

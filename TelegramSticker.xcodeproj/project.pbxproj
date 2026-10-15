@@ -59,7 +59,7 @@
 		1C6F0856307803AA00577D61 /* Exceptions for "StickerKeyboard" folder in "StickerKeyboard" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Info.plist,
+				Resources/Info.plist,
 			);
 			target = 1C6F084D307803AA00577D61 /* StickerKeyboard */;
 		};
@@ -644,7 +644,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RKQCX265PQ;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = StickerKeyboard/Info.plist;
+				INFOPLIST_FILE = StickerKeyboard/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = StickerBridge;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -673,7 +673,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RKQCX265PQ;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = StickerKeyboard/Info.plist;
+				INFOPLIST_FILE = StickerKeyboard/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = StickerBridge;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (

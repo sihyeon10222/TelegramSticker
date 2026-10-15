@@ -244,7 +244,7 @@ struct ImportTests {
             var writtenGIF: Data?, writtenPNG: Data?, reads = 0
             let service = StickerCopyService(loadData: { url in reads += 1; return try Data(contentsOf: url) },
                 writePNG: { writtenPNG = $0 }, writeGIF: { writtenGIF = $0 })
-            let sticker = SampleSticker(id: record.id, name: record.name, detail: installed.title,
+            let sticker = Sticker(id: record.id, name: record.name, detail: installed.title,
                 imageURL: try reader.file(record.pngPath), animationURL: try reader.file(#require(record.animationPath)))
             #expect(service.copy(sticker, isAllowed: false) == .fullAccessRequired)
             #expect(reads == 0 && writtenGIF == nil && writtenPNG == nil)

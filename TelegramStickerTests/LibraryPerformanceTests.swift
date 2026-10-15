@@ -14,7 +14,7 @@ final class LibraryPerformanceTests: XCTestCase {
         // Own bundled images only; no App Group, network, or user's library.
         for pack in 0..<10 {
             let inputs = try (0..<100).map { index in
-                let sample = SampleSticker.all[index % SampleSticker.all.count]
+                let sample = Sticker.all[index % Sticker.all.count]
                 return LocalStickerInput(id: "sticker-\(index)", name: sample.name,
                                          url: try XCTUnwrap(sample.fileURL()))
             }
@@ -39,14 +39,14 @@ final class LibraryPerformanceTests: XCTestCase {
                     let snapshotStart = ContinuousClock.now
                     let snapshot = try reader.snapshot()
                     snapshotSeconds = Self.seconds(snapshotStart.duration(to: .now))
-                    let images = SampleStickerImages()
+                    let images = StickerImages()
                     var writes = 0
                     let copier = StickerCopyService(writePNG: { _ in writes += 1 })
                     let records = snapshot.packs.flatMap { pack in pack.stickers.map { (pack.id, $0) } }
                     for (index, item) in records.prefix(200).enumerated() {
                         try autoreleasepool {
                             let (packID, record) = item
-                            let sample = SampleSticker(id: packID + "." + record.id, name: record.name,
+                            let sample = Sticker(id: packID + "." + record.id, name: record.name,
                                 detail: packID, imageURL: try reader.file(record.pngPath),
                                 thumbnailURL: try reader.file(record.thumbnailPath))
                             XCTAssertNotNil(images.thumbnail(for: sample))

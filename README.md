@@ -1,5 +1,7 @@
 # StickerBridge
 
+[현재 파일 구조·작업별 진입점](File-structure.md) · [작업 지침](AGENTS.md)
+
 기존 `TelegramSticker` iOS/iPadOS 앱과 `StickerKeyboard` 확장을 사용하는 스티커 키보드 기술 검증 프로젝트입니다. 최소 OS는 27.0입니다.
 
 2026-10-14: 팩·GIF 저장 용량 제한을 제거하고 캐시 삭제, 실패 원인·항목별 재시도, Telegram 팩 업데이트, 앱의 큰 미리보기, 키보드 GIF 재생을 추가했습니다. 키보드는 iPhone 세로 기준 7열·4행을 표시하고, 좌우 드래그를 손가락에 맞춰 이동하며 전체 목록은 팩마다 새 줄에서 시작합니다. [최신 구현·검증 결과](docs/Storage-GIF-Updates-Performance.md).
@@ -23,7 +25,9 @@
 - [TGS/WebM 구현 범위·한도·검증](docs/AnimatedStickers-Validation.md)
 - [Worker 로컬 검증 및 이후 설정](backend/worker/README.md)
 - [M1 설치, 검증 명령, 실기기 결과표](docs/Milestone1-Validation.md)
-- `StickerSamples`: 두 타깃에서 함께 사용하는 샘플·복사 소스. App Group 저장소가 아닙니다.
+- `Shared`: 앱·키보드 공통 제품 모델·이미지 처리·저장소 읽기·복사 코드.
+- `StickerSamples`: 두 타깃에 번들되는 자체 제작 샘플 정의·PNG. App Group 저장소가 아닙니다.
+- `TelegramSticker/Networking`: 클라이언트 HTTP·세션. 서버 서비스는 `backend/worker/src/services`에서 관리합니다.
 - `Scripts/GenerateSampleStickers.swift`: macOS CoreGraphics로 테스트 PNG 3장을 재생성합니다. 외부 의존성이 없습니다.
 
 샘플 PNG는 이 프로젝트에서 직접 제작한 기하학적 테스트 이미지이며 CC0-1.0으로 제공합니다. Telegram의 스티커를 재배포하지 않습니다.

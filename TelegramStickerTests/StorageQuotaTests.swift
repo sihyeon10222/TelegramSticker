@@ -27,7 +27,7 @@ struct StorageQuotaTests {
         #expect(pack.stickers.count == 15 && data.count * 15 > 128 * 1024 * 1024)
         var copied = 0
         let service = StickerCopyService(writeGIF: { copied = $0.count })
-        #expect(service.copy(SampleSticker(id: "large", name: "큰 GIF", detail: "", imageURL: png, animationURL: gif), isAllowed: true) == .copied)
+        #expect(service.copy(Sticker(id: "large", name: "큰 GIF", detail: "", imageURL: png, animationURL: gif), isAllowed: true) == .copied)
         #expect(copied == data.count)
         #expect(pack.stickers.allSatisfy { $0.playbackPath != nil })
         try await writer.clearDisposableData()

@@ -4,7 +4,7 @@
 
 계정 없이 Node 24 이상에서 로컬 테스트할 수 있습니다. 런타임 패키지 없이 Fetch API를 사용하며, TypeScript와 Wrangler는 버전을 고정한 개발 도구입니다. `pnpm-lock.yaml`을 유지하고 도구 업데이트 시 테스트·타입 검사·번들 검사를 다시 실행하세요.
 
-테스트에는 Wrangler가 사용하는 것과 같은 버전의 Miniflare를 개발 의존성으로 명시합니다. `runtime.test.mjs`는 실제 workerd에서 production 진입점·rate-limit·캐시를 실행하고, outbound service로 가짜 Telegram 응답만 제공합니다. 이 테스트는 외부 네트워크·실제 Secret·계정을 사용하지 않습니다. 현재 Wrangler에 맞춘 Miniflare 5 alpha를 고정했으므로 두 도구를 함께 업데이트하고 API 변경을 확인해야 합니다. TypeScript 소스는 Node 24의 `stripTypeScriptTypes`로 타입만 제거하며 실험 기능 경고가 표시될 수 있습니다.
+테스트에는 Wrangler가 사용하는 것과 같은 버전의 Miniflare를 개발 의존성으로 명시합니다. `runtime.test.mjs`는 실제 workerd에서 production 진입점·rate-limit·캐시를 실행하고, outbound service로 가짜 Telegram 응답만 제공합니다. 이 테스트는 외부 네트워크·실제 Secret·계정을 사용하지 않습니다. 현재 Wrangler에 맞춘 Miniflare 5 alpha를 고정했으므로 두 도구를 함께 업데이트하고 API 변경을 확인해야 합니다. TypeScript 소스 모듈 전체는 Node 24의 `stripTypeScriptTypes`로 타입만 제거하여 Miniflare에 제공합니다. 실험 기능 경고가 표시될 수 있습니다.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -14,6 +14,18 @@ pnpm check:bundle
 ```
 
 `check:bundle`은 `wrangler deploy --dry-run`이며 업로드하지 않습니다. 의존성 설치 스크립트는 실행하지 않고 선택적 플랫폼 바이너리를 사용합니다. 현재 Mac에서 번들 검사를 통과했습니다. 다른 플랫폼에서 바이너리가 누락되면 설치 로그를 확인하세요.
+
+## 서버 코드 구조
+
+- `src/index.ts`: Worker 진입점과 기존 `createHandler` export.
+- `src/routes/`: 인증 이후 라우팅, 갤러리·팩·파일 요청 조율.
+- `src/services/`: Telegram 연동, 팩 정규화, 파일 스트리밍, 해시.
+- `src/auth/`, `src/cache/`, `src/validation/`, `src/http/`: 서버 인증·캐시·검증·응답 형식.
+- `src/types.ts`: Worker binding·요청별 런타임·내부 저장 타입.
+
+클라이언트의 Worker 요청 코드는 저장소 루트의 `TelegramSticker/Networking/`에 있습니다.
+서버 내부 파일 ID·Bot Token은 이 HTTP 경계를 넘기지 않습니다.
+전체 구조는 [File-structure.md](../../File-structure.md)를 참고하세요.
 
 ## API
 

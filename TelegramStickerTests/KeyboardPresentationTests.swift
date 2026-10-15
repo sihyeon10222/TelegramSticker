@@ -108,12 +108,12 @@ struct KeyboardPresentationTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 96, height: 96))
         let data = renderer.pngData { ctx in UIColor.blue.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 96, height: 96)) }
-        let stickers = try (0..<40).map { i -> SampleSticker in
+        let stickers = try (0..<40).map { i -> Sticker in
             let url = root.appendingPathComponent("\(i).png")
             try data.write(to: url)
-            return SampleSticker(id: "\(i)", name: "Own", detail: "Own", thumbnailURL: url)
+            return Sticker(id: "\(i)", name: "Own", detail: "Own", thumbnailURL: url)
         }
-        let images = SampleStickerImages(maximumPixelSize: 160)
+        let images = StickerImages(maximumPixelSize: 160)
         images.preparePosters(for: stickers, limit: 28)
         #expect(stickers.prefix(28).allSatisfy { images.cachedThumbnail(for: $0) != nil })
         #expect(stickers.dropFirst(28).allSatisfy { images.cachedThumbnail(for: $0) == nil })
@@ -129,11 +129,11 @@ struct KeyboardPresentationTests {
         for (url, color) in [(first, UIColor.red), (second, UIColor.blue)] {
             try renderer.pngData { ctx in color.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 80, height: 80)) }.write(to: url)
         }
-        let old = SampleSticker(id: "same-id", name: "own", detail: "own", thumbnailURL: first)
-        let updated = SampleSticker(id: "same-id", name: "own", detail: "own", thumbnailURL: second)
-        let images = SampleStickerImages(maximumPixelSize: 64)
+        let old = Sticker(id: "same-id", name: "own", detail: "own", thumbnailURL: first)
+        let updated = Sticker(id: "same-id", name: "own", detail: "own", thumbnailURL: second)
+        let images = StickerImages(maximumPixelSize: 64)
         let poster = try #require(await images.thumbnailAsync(for: old))
-        let anotherController = SampleStickerImages(maximumPixelSize: 64)
+        let anotherController = StickerImages(maximumPixelSize: 64)
         #expect(anotherController.cachedThumbnail(for: old) === poster)
         #expect(anotherController.cachedThumbnail(for: updated) == nil)
         let updatedPoster = try #require(await anotherController.thumbnailAsync(for: updated))

@@ -33,7 +33,7 @@ struct TelegramStickerTests {
     }
 
     @Test func invalidAndTruncatedPNGDoNotWrite() throws {
-        let url = try #require(SampleSticker.all.first?.fileURL())
+        let url = try #require(Sticker.all.first?.fileURL())
         let validData = try Data(contentsOf: url)
         var writes = 0
         for invalidData in [Data(), Data("not a PNG".utf8), Data(validData.prefix(40)), Data(repeating: 0, count: 2_097_153)] {
@@ -44,7 +44,7 @@ struct TelegramStickerTests {
     }
 
     @Test func nonPNGImageIsRejected() throws {
-        let url = try #require(SampleSticker.all.first?.fileURL())
+        let url = try #require(Sticker.all.first?.fileURL())
         let image = try #require(UIImage(contentsOfFile: url.path))
         let jpeg = try #require(image.jpegData(compressionQuality: 0.8))
         var writes = 0
@@ -64,8 +64,8 @@ struct TelegramStickerTests {
     }
 
     @Test func samplesCopyWithoutReencodingAndRetainAlpha() throws {
-        #expect(SampleSticker.all.count == 3)
-        for sticker in SampleSticker.all {
+        #expect(Sticker.all.count == 3)
+        for sticker in Sticker.all {
             let url = try #require(sticker.fileURL())
             let original = try Data(contentsOf: url)
             var captured: [Data] = []
@@ -99,7 +99,7 @@ struct TelegramStickerTests {
         let attributes = try #require(extensionInfo["NSExtensionAttributes"] as? [String: Any])
         #expect(attributes["RequestsOpenAccess"] as? Bool == true)
         #expect(attributes["IsASCIICapable"] as? Bool == false)
-        for sticker in SampleSticker.all {
+        for sticker in Sticker.all {
             let appURL = try #require(sticker.fileURL())
             let keyboardURL = try #require(sticker.fileURL(in: keyboard))
             #expect(try Data(contentsOf: appURL) == Data(contentsOf: keyboardURL))
@@ -107,7 +107,7 @@ struct TelegramStickerTests {
     }
 
     @Test func permissionIsEvaluatedForEachCopy() throws {
-        let url = try #require(SampleSticker.all.first?.fileURL())
+        let url = try #require(Sticker.all.first?.fileURL())
         var writes = 0
         let copier = StickerCopyService(writePNG: { _ in writes += 1 })
         #expect(copier.copyPNG(at: url, isAllowed: true) == .copied)

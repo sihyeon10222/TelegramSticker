@@ -1,18 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { stripTypeScriptTypes } from 'node:module';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
 test('production entry point runs in workerd and never follows Telegram redirects', async () => {
-  const source = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const sourceRoot = new URL('../src/', import.meta.url);
+  const entries = await readdir(sourceRoot, { recursive: true });
+  const paths = entries.filter(path => path.endsWith('.ts')).sort((a, b) =>
+    a === 'index.ts' ? -1 : b === 'index.ts' ? 1 : a.localeCompare(b));
+  const modules = await Promise.all(paths.map(async path => ({
+    type: 'ESModule', path: fileURLToPath(new URL(path, sourceRoot)),
+    contents: stripTypeScriptTypes(await readFile(new URL(path, sourceRoot), 'utf8'))
+  })));
   const access = 'local-runtime-test-access-key';
   const token = '123456:LOCAL_RUNTIME_TEST_TOKEN';
   const png = new Uint8Array([137,80,78,71,13,10,26,10,0]);
   const calls = [];
   let redirectFiles = false;
   const worker = new Miniflare(convertV4MiniflareOptions({
-    modules: true, script: stripTypeScriptTypes(source), compatibilityDate: '2026-10-13',
+    modules, modulesRoot: fileURLToPath(sourceRoot), compatibilityDate: '2026-10-13',
     bindings: { BOT_TOKEN: token, ACCESS_KEY: access },
     ratelimits: {
       PACK_LIMIT: { namespace_id: '1', simple: { limit: 100, period: 60 } },

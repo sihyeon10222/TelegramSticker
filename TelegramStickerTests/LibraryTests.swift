@@ -8,7 +8,7 @@ struct LibraryTests {
         let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
             .appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let inputs = try SampleSticker.all.map {
+        let inputs = try Sticker.all.map {
             LocalStickerInput(id: $0.id, name: $0.name, url: try #require($0.fileURL()))
         }
         return (LibraryReader(root: root), inputs)

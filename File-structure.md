@@ -1,152 +1,281 @@
 # 파일 구조와 작업 가이드
 
-기준일: 2026-10-15. 이 문서는 현재 저장소의 위치·책임·타깃 경계를 안내한다.
-아래의 **현재 구조**는 실제 파일이고, **향후 정리안**은 아직 적용하지 않은 제안이다.
-정리안을 근거로 파일이 이미 이동되었다고 가정하지 않는다.
+기준일: 2026-10-15. 아래 구조는 실제 코드에 적용된 현재 구조다.
+파일 추가·이동·삭제 또는 책임·타깃 변경 시 같은 작업에서 이 문서를 갱신한다.
 
 ## 클라이언트와 백엔드 경계
 
-| 영역 | 현재 위치 | 책임 |
+| 영역 | 위치 | 책임 |
 | --- | --- | --- |
 | iOS 클라이언트 | `TelegramSticker/` | 화면, Worker 요청, 다운로드 조율, 로컬 변환·설치·최적화 |
 | 키보드 확장 | `StickerKeyboard/` | 오프라인 목록 표시, 팩 전환, 스티커 복사 |
-| iOS 공통 코드 | `Shared/`, `StickerSamples/` | 앱·키보드가 함께 사용하는 모델, 읽기, 이미지 처리, 복사 |
+| iOS 공통 코드 | `Shared/` | 제품 모델, 라이브러리 읽기, 이미지 처리, 복사, 선택·순서·최근 사용 |
+| 샘플 | `StickerSamples/` | 자체 제작 샘플 정의·PNG 리소스 |
 | 네이티브 디코더 | `Packages/StickerVP9/` | 메인 앱 전용 VP9 디코딩 |
-| 서버 백엔드 | `backend/worker/` | Telegram API 연동, 인증, 갤러리 카탈로그, 캐시, 요청 제한, 파일 중계 |
+| 서버 백엔드 | `backend/worker/` | Telegram API 연동, 서버 인증·캐시·요청 제한, 카탈로그, 파일 중계 |
 
-클라이언트 내부 작업 코드와 서버 서비스 코드를 같은 `Services/` 폴더로 묶지 않는다.
-`WorkerClient`는 클라이언트의 네트워크 어댑터이며 서버 구현이 아니다.
-Telegram Bot Token과 Telegram API 호출은 백엔드에 둔다.
-`Shared/`는 iOS 앱·키보드 공통 영역이며 클라이언트·서버 공통 소스 폴더가 아니다.
-앱과 백엔드는 HTTP API로 연결하고, 각자의 설정·의존성·빌드 경계를 유지한다.
+클라이언트 통신은 `TelegramSticker/Networking/`, 서버 서비스는 `backend/worker/src/services/`에 둔다.
+`WorkerClient`는 클라이언트의 HTTP 어댑터다. Telegram Bot Token과 Telegram API 연동은 백엔드에서 관리한다.
+`Shared/`는 iOS 앱·키보드 공통 코드이며 서버 공통 소스 영역이 아니다.
+앱과 백엔드는 HTTP API로 연결하고 설정·의존성·빌드 경계를 유지한다.
 
 ## 현재 구조
 
+외부 libvpx, 에셋 내부, 테스트·검증 문서의 세부 목록은 접어서 표시한다.
+
 ```text
 TelegramSticker/
-├── AGENTS.md                         # 작업 지침·빌드·기기·테스트 정책
-├── File-structure.md                 # 이 문서
-├── README.md                         # 프로젝트 소개·검증 문서 진입점
-├── TelegramSticker.xcodeproj/        # 타깃·서명·패키지·공유 scheme
+├── AGENTS.md
+├── File-structure.md
+├── README.md
+├── TelegramSticker.xcodeproj/
 ├── Configuration/
-│   ├── App-Info.plist                # 백그라운드 작업·링크 파일 형식 선언
-│   ├── TelegramSticker.entitlements
-│   └── StickerKeyboard.entitlements
-├── TelegramSticker/                  # 메인 앱
-│   ├── TelegramStickerApp.swift
-│   ├── ContentView.swift
-│   ├── OnboardingView.swift
-│   ├── LibraryView.swift
-│   ├── LibraryWriter.swift
-│   ├── GalleryView.swift
-│   ├── GalleryCatalogStore.swift
-│   ├── GalleryPreviewStore.swift
-│   ├── GalleryStickerPreview.swift
-│   ├── AnimationPreview.swift
-│   ├── OptimizationView.swift
-│   ├── StickerStorageOptimizer.swift
-│   ├── KeyboardPlaybackBuilder.swift
-│   ├── StorageSettingsView.swift
-│   ├── BackgroundWork.swift
-│   ├── PackLinkSharing.swift
-│   ├── Import/
-│   │   ├── ImportView.swift
-│   │   ├── ImportCoordinator.swift
-│   │   ├── ImportTypes.swift
-│   │   ├── ImportSettings.swift
-│   │   ├── WorkerClient.swift
-│   │   ├── RequestGate.swift
-│   │   ├── ImportJobCache.swift
-│   │   ├── ImportFailure.swift
+│   ├── App-Info.plist
+│   ├── StickerKeyboard.entitlements
+│   └── TelegramSticker.entitlements
+├── TelegramSticker/
+│   ├── App/
+│   │   ├── ContentView.swift
+│   │   └── TelegramStickerApp.swift
+│   ├── Background/
+│   │   ├── BackgroundWork.swift
+│   │   └── WorkNotifications.swift
+│   ├── Components/
+│   │   ├── AnimationPreview.swift
+│   │   ├── CurrentWorkBanner.swift
+│   │   └── KeyboardPermissionReminder.swift
+│   ├── Concurrency/
+│   │   └── RequestGate.swift
+│   ├── Conversion/
 │   │   ├── AnimationQuality.swift
+│   │   ├── KeyboardPlaybackBuilder.swift
 │   │   ├── StaticImageConverter.swift
 │   │   ├── TGSConverter.swift
-│   │   ├── WebMConverter.swift
-│   │   └── ImportPreviewFixture.swift # DEBUG 전용 코드
-│   ├── Assets.xcassets/
-│   ├── AnimationSamples/
-│   ├── PrivacyInfo.xcprivacy
-│   └── ThirdPartyNotices.txt
+│   │   └── WebMConverter.swift
+│   ├── DebugSupport/
+│   │   └── ImportPreviewFixture.swift
+│   ├── Diagnostics/
+│   │   └── DownloadDiagnostics.swift
+│   ├── Features/
+│   │   ├── Gallery/
+│   │   │   ├── GalleryCatalogStore.swift
+│   │   │   ├── GalleryMetadataStore.swift
+│   │   │   ├── GalleryPreviewStore.swift
+│   │   │   ├── GalleryStickerPreview.swift
+│   │   │   └── GalleryView.swift
+│   │   ├── Import/
+│   │   │   ├── Components/
+│   │   │   │   ├── PackLinkReorderDropDelegate.swift
+│   │   │   │   └── RemoteStickerPreview.swift
+│   │   │   ├── ImportInput.swift
+│   │   │   ├── ImportModel.swift
+│   │   │   └── ImportView.swift
+│   │   ├── Library/
+│   │   │   ├── InstalledPackView.swift
+│   │   │   ├── LibraryModel.swift
+│   │   │   ├── LibraryView.swift
+│   │   │   └── PackImportRequest.swift
+│   │   ├── Onboarding/
+│   │   │   └── OnboardingView.swift
+│   │   ├── Optimization/
+│   │   │   ├── OptimizationCenter.swift
+│   │   │   ├── OptimizationRequest.swift
+│   │   │   ├── OptimizationSession.swift
+│   │   │   └── OptimizationView.swift
+│   │   └── Settings/
+│   │       ├── AppResetButton.swift
+│   │       ├── DownloadLogsView.swift
+│   │       ├── KeyboardAccessMonitor.swift
+│   │       ├── KeyboardSettingsButton.swift
+│   │       ├── KeyboardSetupAction.swift
+│   │       ├── SettingsView.swift
+│   │       └── StorageSettingsView.swift
+│   ├── Importing/
+│   │   ├── ImportActivity.swift
+│   │   ├── ImportCoordinator.swift
+│   │   ├── ImportFailure.swift
+│   │   ├── ImportFailureStore.swift
+│   │   ├── ImportJobCache.swift
+│   │   ├── ImportProgress.swift
+│   │   └── StickerImportError.swift
+│   ├── Networking/
+│   │   ├── DownloadRequestBudget.swift
+│   │   ├── ImportSettings.swift
+│   │   ├── RemoteGallery.swift
+│   │   ├── RemotePack.swift
+│   │   ├── WorkerClient.swift
+│   │   └── WorkerConfiguration.swift
+│   ├── Resources/
+│   │   ├── AnimationSamples/
+│   │   ├── Assets.xcassets/
+│   │   ├── PrivacyInfo.xcprivacy
+│   │   └── ThirdPartyNotices.txt
+│   ├── Sharing/
+│   │   ├── PNGShareSheet.swift
+│   │   ├── PackLinkSharing.swift
+│   │   └── StickerLink.swift
+│   └── Storage/
+│       ├── AppDisposableCache.swift
+│       ├── LibraryWriter.swift
+│       └── StickerStorageOptimizer.swift
 ├── StickerKeyboard/
-│   ├── KeyboardViewController.swift
-│   ├── Info.plist
-│   └── PrivacyInfo.xcprivacy
+│   ├── Clipboard/
+│   │   └── KeyboardCopying.swift
+│   ├── Navigation/
+│   │   ├── KeyboardPackReordering.swift
+│   │   ├── KeyboardPaging.swift
+│   │   ├── PackDragScrollProxy.swift
+│   │   └── PackDragSession.swift
+│   ├── Presentation/
+│   │   ├── KeyboardCollection.swift
+│   │   ├── KeyboardLibrary.swift
+│   │   └── KeyboardStatus.swift
+│   ├── Resources/
+│   │   ├── Info.plist
+│   │   └── PrivacyInfo.xcprivacy
+│   ├── Views/
+│   │   ├── PackTabButton.swift
+│   │   ├── PackTabScrollView.swift
+│   │   └── StickerCell.swift
+│   └── KeyboardViewController.swift
 ├── Shared/
-│   ├── StickerLibrary.swift          # 저장 모델·LibraryReader·접근 관찰 기록
-│   ├── StickerThumbnailDecoder.swift
-│   ├── GIFPlaybackView.swift         # 타임라인·디코더·뷰·재생 시계
-│   ├── GIFValidation.swift
-│   ├── PNGValidation.swift
-│   ├── StickerGridLayout.swift
-│   ├── KeyboardSelectionStore.swift
-│   ├── KeyboardPackOrderStore.swift
-│   └── RecentStickerStore.swift
+│   ├── Clipboard/
+│   │   └── StickerCopyService.swift
+│   ├── Imaging/
+│   │   ├── GIFPlaybackView.swift
+│   │   ├── GIFValidation.swift
+│   │   ├── PNGValidation.swift
+│   │   ├── StickerImages.swift
+│   │   └── StickerThumbnailDecoder.swift
+│   ├── Keyboard/
+│   │   ├── KeyboardAccessReceipt.swift
+│   │   └── StickerGridLayout.swift
+│   ├── Models/
+│   │   ├── LibraryModels.swift
+│   │   └── Sticker.swift
+│   └── Storage/
+│       ├── KeyboardPackOrderStore.swift
+│       ├── KeyboardSelectionStore.swift
+│       ├── LibraryReader.swift
+│       └── RecentStickerStore.swift
 ├── StickerSamples/
-│   ├── SampleSticker.swift           # 제품에서도 쓰는 모델·이미지 캐시 포함
-│   ├── StickerCopyService.swift      # 제품에서도 쓰는 복사 서비스
-│   └── Resources/                    # 자체 제작 샘플 PNG
-├── Packages/StickerVP9/
-│   ├── Package.swift
-│   ├── README.md
-│   └── Sources/CStickerVP9/
-│       ├── StickerVP9.c              # 프로젝트 소유 C 래퍼
-│       ├── include/StickerVP9.h
-│       └── vendor/                   # libvpx 소스·생성 헤더·라이선스
-├── TelegramStickerTests/             # 저장·변환·가져오기·레이아웃 등
-│   └── Fixtures/                     # TGS·WebM·WebP 검증 입력
-├── TelegramStickerUITests/           # 앱·실제 키보드·실기기 선택 검사
-├── backend/                          # 서버 전용 경계
+│   ├── Resources/
+│   └── SampleStickers.swift
+├── Packages/
+│   └── StickerVP9/
+│       ├── .swiftpm/
+│       │   └── xcode/
+│       │       └── xcuserdata/
+│       │           └── sihyeon.xcuserdatad/
+│       │               └── xcschemes/
+│       │                   └── xcschememanagement.plist
+│       ├── Sources/
+│       │   └── CStickerVP9/
+│       │       ├── include/
+│       │       │   └── StickerVP9.h
+│       │       ├── vendor/
+│       │       └── StickerVP9.c
+│       ├── Package.swift
+│       └── README.md
+├── TelegramStickerTests/
+├── TelegramStickerUITests/
+├── Scripts/
+│   ├── GenerateAnimatedFixtures.py
+│   └── GenerateSampleStickers.swift
+├── backend/
 │   └── worker/
-│       ├── src/index.ts              # 현재 서버 로직 진입점·구현
+│       ├── src/
+│       │   ├── auth/
+│       │   │   └── session.ts
+│       │   ├── cache/
+│       │   │   └── worker-cache.ts
+│       │   ├── http/
+│       │   │   └── response.ts
+│       │   ├── routes/
+│       │   │   ├── gallery.ts
+│       │   │   ├── handler.ts
+│       │   │   └── packs.ts
+│       │   ├── services/
+│       │   │   ├── assets.ts
+│       │   │   ├── digest.ts
+│       │   │   ├── packs.ts
+│       │   │   └── telegram.ts
+│       │   ├── validation/
+│       │   │   ├── content-type.ts
+│       │   │   ├── limits.ts
+│       │   │   └── response.ts
+│       │   ├── index.ts
+│       │   └── types.ts
 │       ├── test/
-│       │   ├── worker.test.mjs
-│       │   └── runtime.test.mjs
+│       │   ├── runtime.test.mjs
+│       │   └── worker.test.mjs
+│       ├── README.md
 │       ├── package.json
 │       ├── pnpm-lock.yaml
 │       ├── pnpm-workspace.yaml
 │       ├── tsconfig.json
-│       ├── wrangler.jsonc
-│       └── README.md
-├── Scripts/
-│   ├── GenerateSampleStickers.swift
-│   └── GenerateAnimatedFixtures.py
-└── docs/                             # 기능·검증 이력, Images/, branding/
+│       └── wrangler.jsonc
+└── docs/
 ```
 
 ## 작업별 시작 파일
 
-| 작업 | 먼저 읽을 현재 파일 |
+| 작업 | 현재 진입 파일 |
 | --- | --- |
-| 앱 진입·탭·진행 작업 다시 열기 | `TelegramSticker/TelegramStickerApp.swift`, `TelegramSticker/ContentView.swift` |
-| 온보딩·키보드 접근 관찰 | `TelegramSticker/OnboardingView.swift`, `Shared/StickerLibrary.swift` |
-| 설치 팩 목록·상세·공유 | `TelegramSticker/LibraryView.swift`, `TelegramSticker/PackLinkSharing.swift` |
-| 단일·일괄 가져오기·재시도 | `TelegramSticker/Import/ImportView.swift`, `TelegramSticker/Import/ImportCoordinator.swift` |
-| 클라이언트 통신·세션·요청 제어 | `TelegramSticker/Import/WorkerClient.swift`, `TelegramSticker/Import/RequestGate.swift`, `TelegramSticker/Import/ImportSettings.swift` |
-| 원격·로컬 데이터 형식 | `TelegramSticker/Import/ImportTypes.swift`, `Shared/StickerLibrary.swift` |
-| TGS·WebM·정적 이미지 변환 | `TelegramSticker/Import/TGSConverter.swift`, `TelegramSticker/Import/WebMConverter.swift`, `TelegramSticker/Import/StaticImageConverter.swift`, `TelegramSticker/Import/AnimationQuality.swift` |
-| 설치·업데이트·저장 안전성 | `TelegramSticker/LibraryWriter.swift`, `Shared/StickerLibrary.swift` |
-| 용량 최적화·재생용 GIF | `TelegramSticker/OptimizationView.swift`, `TelegramSticker/StickerStorageOptimizer.swift`, `TelegramSticker/KeyboardPlaybackBuilder.swift` |
-| 캐시 정리·초기화 | `TelegramSticker/StorageSettingsView.swift`, `TelegramSticker/Import/ImportJobCache.swift` |
-| 갤러리 목록·미리보기 | `TelegramSticker/GalleryView.swift`, `TelegramSticker/GalleryCatalogStore.swift`, `TelegramSticker/GalleryPreviewStore.swift`, `TelegramSticker/GalleryStickerPreview.swift` |
-| 백그라운드 진행·완료 알림 | `TelegramSticker/BackgroundWork.swift` |
-| 실패 원인·다운로드 로그 | `TelegramSticker/Import/ImportFailure.swift`, `TelegramSticker/Import/ImportView.swift` |
-| 키보드 표시·팩 전환·드래그·복사 | `StickerKeyboard/KeyboardViewController.swift`, `Shared/StickerGridLayout.swift`, `StickerSamples/StickerCopyService.swift` |
-| GIF 재생·썸네일 | `Shared/GIFPlaybackView.swift`, `Shared/StickerThumbnailDecoder.swift`, `StickerSamples/SampleSticker.swift`, `TelegramSticker/AnimationPreview.swift` |
-| 선택·순서·최근 사용 복원 | `Shared/KeyboardSelectionStore.swift`, `Shared/KeyboardPackOrderStore.swift`, `Shared/RecentStickerStore.swift` |
-| 서버 API·인증·Telegram 중계 | `backend/worker/src/index.ts`, `backend/worker/README.md`, `backend/worker/wrangler.jsonc` |
-| 타깃 포함 관계·번들·패키지 | `TelegramSticker.xcodeproj/project.pbxproj`, `Packages/StickerVP9/Package.swift` |
+| 앱 진입·탭 | `TelegramSticker/App/TelegramStickerApp.swift`, `TelegramSticker/App/ContentView.swift` |
+| 팩 목록·상세 | `TelegramSticker/Features/Library/LibraryModel.swift`, `TelegramSticker/Features/Library/LibraryView.swift`, `TelegramSticker/Features/Library/InstalledPackView.swift` |
+| 가져오기 화면·작업 상태 | `TelegramSticker/Features/Import/ImportView.swift`, `TelegramSticker/Features/Import/ImportModel.swift`, `TelegramSticker/Importing/ImportActivity.swift` |
+| 단일·일괄 가져오기·재개 | `TelegramSticker/Importing/ImportCoordinator.swift`, `TelegramSticker/Importing/ImportJobCache.swift` |
+| 클라이언트 HTTP·세션·요청 제어 | `TelegramSticker/Networking/WorkerClient.swift`, `TelegramSticker/Networking/DownloadRequestBudget.swift`, `TelegramSticker/Concurrency/RequestGate.swift` |
+| 연결 설정·API DTO | `TelegramSticker/Networking/ImportSettings.swift`, `TelegramSticker/Networking/WorkerConfiguration.swift`, `TelegramSticker/Networking/RemotePack.swift`, `TelegramSticker/Networking/RemoteGallery.swift` |
+| TGS·WebM·정적 이미지 변환 | `TelegramSticker/Conversion/TGSConverter.swift`, `TelegramSticker/Conversion/WebMConverter.swift`, `TelegramSticker/Conversion/StaticImageConverter.swift` |
+| 설치·저장 안정성 | `TelegramSticker/Storage/LibraryWriter.swift`, `Shared/Storage/LibraryReader.swift`, `Shared/Models/LibraryModels.swift` |
+| 용량 최적화 | `TelegramSticker/Features/Optimization/OptimizationSession.swift`, `TelegramSticker/Features/Optimization/OptimizationView.swift`, `TelegramSticker/Storage/StickerStorageOptimizer.swift` |
+| 캐시·초기화 | `TelegramSticker/Features/Settings/StorageSettingsView.swift`, `TelegramSticker/Features/Settings/AppResetButton.swift`, `TelegramSticker/Storage/AppDisposableCache.swift` |
+| 갤러리 | `TelegramSticker/Features/Gallery/GalleryView.swift`, `TelegramSticker/Features/Gallery/GalleryCatalogStore.swift`, `TelegramSticker/Features/Gallery/GalleryPreviewStore.swift` |
+| 온보딩·접근 관찰 | `TelegramSticker/Features/Onboarding/OnboardingView.swift`, `TelegramSticker/Features/Settings/KeyboardAccessMonitor.swift`, `Shared/Keyboard/KeyboardAccessReceipt.swift` |
+| 백그라운드 진행·알림 | `TelegramSticker/Background/BackgroundWork.swift`, `TelegramSticker/Background/WorkNotifications.swift`, `TelegramSticker/Components/CurrentWorkBanner.swift` |
+| 실패·진단 로그 | `TelegramSticker/Importing/ImportFailure.swift`, `TelegramSticker/Importing/ImportFailureStore.swift`, `TelegramSticker/Diagnostics/DownloadDiagnostics.swift`, `TelegramSticker/Features/Settings/DownloadLogsView.swift` |
+| 링크·이미지 공유 | `TelegramSticker/Sharing/PackLinkSharing.swift`, `TelegramSticker/Sharing/StickerLink.swift`, `TelegramSticker/Sharing/PNGShareSheet.swift` |
+| 키보드 수명 주기·초기 구성 | `StickerKeyboard/KeyboardViewController.swift` |
+| 키보드 목록·복원·셀 표시 | `StickerKeyboard/Presentation/KeyboardLibrary.swift`, `StickerKeyboard/Presentation/KeyboardCollection.swift`, `StickerKeyboard/Presentation/KeyboardStatus.swift` |
+| 키보드 페이징·팩 드래그 | `StickerKeyboard/Navigation/KeyboardPaging.swift`, `StickerKeyboard/Navigation/KeyboardPackReordering.swift` |
+| 키보드 셀·탭·복사 | `StickerKeyboard/Views/StickerCell.swift`, `StickerKeyboard/Views/PackTabButton.swift`, `StickerKeyboard/Clipboard/KeyboardCopying.swift`, `Shared/Clipboard/StickerCopyService.swift` |
+| 제품 스티커 모델·이미지 캐시 | `Shared/Models/Sticker.swift`, `Shared/Imaging/StickerImages.swift`, `Shared/Imaging/StickerThumbnailDecoder.swift` |
+| GIF 재생·키보드 레이아웃 | `Shared/Imaging/GIFPlaybackView.swift`, `Shared/Keyboard/StickerGridLayout.swift`, `TelegramSticker/Conversion/KeyboardPlaybackBuilder.swift` |
+| 선택·순서·최근 사용 | `Shared/Storage/KeyboardSelectionStore.swift`, `Shared/Storage/KeyboardPackOrderStore.swift`, `Shared/Storage/RecentStickerStore.swift` |
+| 서버 진입·라우팅 | `backend/worker/src/index.ts`, `backend/worker/src/routes/handler.ts`, `backend/worker/src/routes/packs.ts`, `backend/worker/src/routes/gallery.ts` |
+| 서버 Telegram 연동·팩 처리 | `backend/worker/src/services/telegram.ts`, `backend/worker/src/services/packs.ts`, `backend/worker/src/services/assets.ts` |
+| 서버 인증·캐시·검증 | `backend/worker/src/auth/session.ts`, `backend/worker/src/cache/worker-cache.ts`, `backend/worker/src/validation/limits.ts`, `backend/worker/src/validation/response.ts`, `backend/worker/src/validation/content-type.ts` |
+| 타깃·서명·패키지 | `TelegramSticker.xcodeproj/project.pbxproj`, `Configuration/App-Info.plist`, `Packages/StickerVP9/Package.swift`, `backend/worker/wrangler.jsonc` |
 
-## 타깃과 의존성 규칙
+## 책임별 코드 배치
+
+- `Features/`: 기능별 SwiftUI 화면과 화면 모델. 큰 화면의 모델·세부 화면·보조 뷰는 같은 기능 아래에서 분리한다.
+- `Networking/`: 클라이언트 HTTP·세션·API DTO·요청 속도 예산. 서버 서비스 구현을 넣지 않는다.
+- `Importing/`: 다운로드·변환·설치 조율, 재개용 작업 파일, 실패 상태. 범용 캐시 정리는 `Storage/`에 둔다.
+- `Conversion/`: 메인 앱의 로컬 변환기. `Concurrency/RequestGate.swift`는 다운로드와 변환이 사용하는 앱 내부 동시성 도구다.
+- `Storage/`: 설치 데이터 쓰기·최적화·정리. 공유 읽기·영속 모델은 `Shared/Storage/`, `Shared/Models/`에 둔다.
+- `Background/`, `Diagnostics/`, `Sharing/`, `Components/`: 각 기능에서 재사용하는 앱 내부 코드.
+- `DebugSupport/`: DEBUG fixture 코드. UI 테스트 전용 실행 인수로만 사용한다.
+- 키보드의 `Presentation/`, `Navigation/`, `Clipboard/`는 동일 타깃의 `KeyboardViewController` 확장이다. 저장 상태는 컨트롤러가 소유하고 해당 파일들이 내부 접근 수준으로 공유한다.
+- `Sticker`와 `StickerImages`는 제품 코드다. 샘플 배열 `Sticker.all`은 `StickerSamples/SampleStickers.swift`의 별도 확장에 둔다.
+- 서버 `routes/`는 요청·응답 조율, `services/`는 Telegram 연동·팩 처리·스트리밍, `auth/`는 인증, `cache/`는 캐시, `validation/`은 입력·응답 검증을 담당한다.
+
+## 타깃과 리소스 규칙
 
 - 메인 앱은 `TelegramSticker/`, `Shared/`, `StickerSamples/`를 포함하고 Lottie·StickerVP9에 의존한다.
-- 키보드는 `StickerKeyboard/`, `Shared/`, `StickerSamples/`를 포함한다. Lottie·StickerVP9·WorkerClient·변환 파이프라인을 연결하지 않는다.
-- 단위 테스트와 UI 테스트는 각각 별도 Xcode 타깃이다. Worker 검사·의존성은 `backend/worker/`에서 관리한다.
-- Xcode의 파일 시스템 동기화 그룹을 사용한다. 파일 이동 시 폴더뿐 아니라 타깃 포함 관계, plist 설정, 번들 리소스 조회도 확인한다.
-- `StickerSamples/`의 두 Swift 파일은 현재 제품 코드다. 샘플 폴더 정리 시 테스트 전용으로 취급해 제거하지 않는다.
-- `vendor/`는 외부 코드와 생성 헤더를 포함한다. 일반 앱 정리와 분리하고 패키지 README의 갱신 절차를 따른다. 테스트 실행은 루트 `AGENTS.md`의 사용자 요청 조건을 따른다.
-- API 계약을 바꾸면 클라이언트 DTO·오류 처리와 Worker 응답을 함께 확인한다. 서버 내부 ID·Bot Token을 클라이언트로 노출하지 않는다.
+- 키보드는 `StickerKeyboard/`, `Shared/`, `StickerSamples/`를 포함한다. 네트워크·가져오기·TGS/WebM 변환·Lottie·StickerVP9를 연결하지 않는다.
+- Xcode 파일 시스템 동기화 그룹을 유지한다. 하위 폴더의 Swift 파일도 기존 타깃에 포함된다.
+- 키보드 plist는 `StickerKeyboard/Resources/Info.plist`다. 두 빌드 구성의 `INFOPLIST_FILE`과 동기화 그룹 리소스 제외 경로를 함께 유지한다.
+- 앱 에셋·애니메이션 샘플·고지·privacy manifest는 `TelegramSticker/Resources/`에 둔다. 키보드 privacy manifest는 `StickerKeyboard/Resources/`에 둔다.
+- 리소스 이동 시 번들 조회 이름을 보존한다. 자체 제작 샘플 PNG는 두 타깃에 계속 번들된다.
+- `Packages/StickerVP9/Sources/CStickerVP9/vendor/`는 외부 소스와 생성 헤더다. 패키지 README의 갱신 절차를 따르고 일반 구조 정리에서 수정하지 않는다.
+- API 변경 시 클라이언트 DTO·오류 처리와 Worker 응답을 함께 확인한다. 서버 내부 파일 ID와 Bot Token을 클라이언트로 노출하지 않는다.
+- Worker의 `.ts` 모듈은 명시적 확장자로 import한다. 타입 전용 의존성에는 `import type`을 사용한다. 런타임 검사는 전체 모듈 그래프를 Miniflare에 제공하도록 구성되어 있다.
 
 ## 실행 중 데이터 위치
+
 
 소스 폴더와 기기의 실행 중 저장소는 별개다. 파일 구조 정리로 기존 사용자 데이터 경로를 바꾸지 않는다.
 
@@ -180,84 +309,16 @@ App Group: group.com.sihyeon.TelegramSticker
 키보드는 설치 팩을 읽고 자체 선택·순서·최근 사용을 저장한다.
 전체 접근 관찰 기록은 별도로 App Group에 기록하며, 현재 권한의 실시간 조회 결과로 해석하지 않는다.
 
-## 향후 정리안 — 미적용
+## 구조 변경 시 확인
 
-최상위 앱·키보드·백엔드 경계를 유지하고, 클라이언트 내부는 기능과 책임별로 정리한다.
-폴더 이동과 동작·성능 변경을 구분해 진행한다.
+1. 이동·추출한 선언의 호출부와 접근 수준을 확인한다. 역할 분리만으로 저장 형식·사용자 동작을 바꾸지 않는다.
+2. 타깃 포함 관계·리소스 조회·네트워크 경계를 확인한다.
+3. 앱 변경 후 빌드·연결된 iPhone 덮어쓰기 설치·실행 정책은 [AGENTS.md](AGENTS.md)를 따른다.
+4. 테스트는 사용자가 명시적으로 요청할 때만 실행한다. 코드 이동으로 필요한 테스트 import·타입 참조는 함께 갱신한다.
+5. 기존 `docs/`의 검증 결과는 당시 기록이다. 현재 코드의 동작·성능 증거로 대체하지 않는다.
 
-```text
-TelegramSticker/
-├── App/
-├── Features/
-│   ├── Library/
-│   ├── Import/
-│   ├── Gallery/
-│   ├── Optimization/
-│   ├── Onboarding/
-│   └── Settings/
-├── Networking/                      # 클라이언트 Worker 요청·세션·요청 제어
-├── Importing/                       # 다운로드 조율·재개
-├── Conversion/                      # 로컬 TGS·WebM·이미지 변환
-├── Storage/                         # 로컬 쓰기·용량 최적화
-├── Background/
-├── Diagnostics/
-├── Sharing/
-├── Components/
-├── DebugSupport/
-└── Resources/
+이번 정리는 폴더·파일 책임 분리다. 로그 저장 빈도, 파일 조회 비용, 변환 성능, 이전 UI와 맞지 않는 테스트 시나리오의 개선은 별도 동작 변경으로 다룬다.
 
-StickerKeyboard/
-├── KeyboardViewController.swift
-├── Presentation/
-├── Navigation/
-├── Views/
-└── Resources/
+## 작업별 진단 기록
 
-Shared/
-├── Models/
-├── Storage/
-├── Imaging/
-├── Clipboard/
-└── Keyboard/
-
-backend/worker/
-├── src/
-│   ├── index.ts
-│   ├── routes/
-│   ├── services/                    # 서버 내부 Telegram 연동·처리만
-│   ├── auth/
-│   ├── cache/
-│   └── validation/
-├── test/
-└── 설정 파일·README                 # 기존 설정·lockfile 유지
-```
-
-| 현재 파일·구성 | 향후 배치·분리 방향 |
-| --- | --- |
-| `TelegramStickerApp.swift`, `ContentView.swift` | 앱 내부 `App/`; 설정 화면·공통 배너는 해당 기능·컴포넌트로 분리 |
-| `LibraryView.swift` | `Features/Library/`; LibraryModel·팩 상세·공유 시트를 책임별로 분리 |
-| `Import/ImportView.swift` | `Features/Import/`; ImportModel·작업 상태·미리보기·로그 화면 분리 |
-| `GalleryView.swift`, 갤러리 Store·Preview 파일 | `Features/Gallery/`; 공통 통신·변환은 각 전용 영역 사용 |
-| `OptimizationView.swift` | `Features/Optimization/`; 비교 세션·화면 분리 |
-| `OnboardingView.swift`, `StorageSettingsView.swift` | 해당 Feature; 공통 접근 관찰·초기화 처리는 책임별 분리 |
-| `Import/WorkerClient.swift`, `ImportSettings.swift` | `Networking/`; 클라이언트 연결 설정·세션 유지 |
-| `Import/RequestGate.swift` | 요청 속도 예산은 `Networking/`; 범용 gate는 사용 범위를 확인해 앱 내부 공통 코드로 분리 |
-| `Import/ImportCoordinator.swift`, `ImportJobCache.swift` | `Importing/`; 범용 캐시 정리·초기화는 `Storage/`로 분리 |
-| `Import/ImportTypes.swift`, `ImportFailure.swift` | API DTO는 `Networking/`, 가져오기 상태는 `Importing/`, 로그는 `Diagnostics/` |
-| 변환기·`AnimationQuality.swift`, `KeyboardPlaybackBuilder.swift` | 앱 내부 `Conversion/` |
-| `LibraryWriter.swift`, `StickerStorageOptimizer.swift` | 앱 내부 `Storage/` |
-| `BackgroundWork.swift`, `PackLinkSharing.swift`, `AnimationPreview.swift` | 각각 `Background/`, `Sharing/`, `Components/` |
-| `Import/ImportPreviewFixture.swift` | `DebugSupport/`; DEBUG 조건 유지 |
-| `StickerSamples/SampleSticker.swift` | 제품 모델은 `Shared/Models/`, 이미지 캐시는 `Shared/Imaging/`, 샘플 정의·이미지는 기존 샘플 영역에 유지 |
-| `StickerSamples/StickerCopyService.swift` | `Shared/Clipboard/` |
-| `Shared/StickerLibrary.swift` | 모델·Reader·키보드 접근 관찰을 각각 `Models/`, `Storage/`, `Keyboard/`로 분리 |
-| 나머지 `Shared/` 파일 | 이미지 검증·재생·썸네일은 `Imaging/`, 선택·순서·최근 사용은 `Storage/`, 그리드는 `Keyboard/` |
-| `KeyboardViewController.swift` | 컨트롤러 조율을 남기고 초기 표시·팩 전환·드래그·셀을 해당 확장 하위 폴더로 분리 |
-| `backend/worker/src/index.ts` | 서버 진입점을 유지하며 라우트·서버 서비스·인증·캐시·검증 분리 |
-
-## 문서 유지
-
-- 파일 추가·이동·삭제 또는 책임·타깃·저장 경로 변경 시 이 문서를 같은 작업에서 갱신한다.
-- 새 코드의 위치는 현재 구조와 변경 목적을 기준으로 정한다. 아직 없는 정리안 전체를 자동 적용하지 않는다.
-- 기존 검증 문서는 당시 결과다. 현재 코드의 성공·성능 수치로 그대로 인용하지 않는다.
-- 빌드·실기기 설치·테스트 실행 정책은 [AGENTS.md](AGENTS.md)를 따른다.
+`Diagnostics/DownloadDiagnostics.swift`는 Task-local 작업 ID로 동시 팩 다운로드의 상세 로그를 같은 일괄 작업에 연결한다. 다운로드·업데이트·복원·최적화·팩 미리보기는 각각 별도 작업이며, 갤러리와 기타 서비스 오류는 별도 진단 묶음이다. 기존 `Application Support/download-log.json` 경로를 유지하고 이전 배열 형식은 이전 버전 로그로 읽는다. 최근 완료 작업 40개, 작업당 최근 3,000줄을 보관하며 연속 기록의 디스크 저장은 500ms로 합친다. `Features/Settings/DownloadLogsView.swift`는 작업 선택·복사와 팩/오류 필터를 담당한다. 메인 앱 타깃만 사용하며 키보드에는 연결하지 않는다.
