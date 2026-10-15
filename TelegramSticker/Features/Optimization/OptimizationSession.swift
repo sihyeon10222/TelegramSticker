@@ -69,6 +69,7 @@ final class OptimizationSession: Identifiable {
         ImportActivity.shared.count += 1
         operation = Task {
             await DownloadDiagnostics.shared.run(title: apply ? "용량 최적화 적용" : "용량 최적화 비교 준비") {
+                await GalleryPreviewStore.shared.cancelForForegroundWork()
                 let id = await BackgroundWork.shared.begin(kind: apply ? .optimizationApply : .optimizationPreparation, title: apply ? "스티커 용량 최적화 적용" : "스티커 용량 최적화 비교 준비") { self.cancel() }
                 var success = false
                 defer {

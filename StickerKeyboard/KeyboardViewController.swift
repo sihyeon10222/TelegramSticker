@@ -4,34 +4,19 @@ import os
 final class KeyboardViewController: UIInputViewController,
                                     UICollectionViewDataSource,
                                     UICollectionViewDelegate, UIGestureRecognizerDelegate {
-    // State shared by the responsibility-specific extensions in this target.
+    let state = KeyboardState()
     let performance = OSSignposter(subsystem: "com.sihyeon.TelegramSticker.StickerKeyboard", category: "PointsOfInterest")
-    var stickers: [Sticker] = []
-    var packs: [PackManifestV1] = []
-    var libraryPacks: [PackManifestV1] = []
-    var prepared: [String: [Sticker]] = [:]
-    var byStickerID: [String: Sticker] = [:]
+    var displayedCacheGeneration: String?
     var tabSignature: [String] = []
-    var cacheGeneration: String?
     var playbackSuspended = false
-    var reader: LibraryReader?
-    var canPruneHistory = false
     typealias Selection = KeyboardSelection
-    var selection = Selection.all
-    let selectionStore = KeyboardSelectionStore()
-    static var cachedLibrary: (LibraryReader, LibrarySnapshot)?
-    var libraryRevision: String?
     var dragSession: PackDragSession?
     var dragDisplayLink: CADisplayLink?
     lazy var dragProxy = PackDragScrollProxy(owner: self)
-    let recent = RecentStickerStore()
-    let packOrder = KeyboardPackOrderStore()
     let packTabs = UIStackView()
     lazy var packSwipe = UIPanGestureRecognizer(target: self, action: #selector(handlePackSwipe(_:)))
     let tabScroll = PackTabScrollView()
     let toast = UIView()
-    var lastCopiedID: String?
-    var libraryNote: String?
     var loadTask: Task<Void, Never>?
     var loadGeneration = 0
     var presentationActive = false
@@ -79,7 +64,7 @@ final class KeyboardViewController: UIInputViewController,
         view.isOpaque = false
         view.clipsToBounds = true
         view.accessibilityIdentifier = "keyboardSurface"
-        selection = selectionStore.selection
+        state.restoreSelection()
         // One documented height request. Keep UIInputView's native sizing;
         // overriding fitting/intrinsic size as well causes a second negotiation.
         let keyboardHeight = view.heightAnchor.constraint(equalToConstant: preferredKeyboardHeight)
@@ -245,11 +230,7 @@ final class KeyboardViewController: UIInputViewController,
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        if let epoch = UserDefaults(suiteName: LibraryReader.appGroup)?.string(forKey: "appResetEpoch"),
-           UserDefaults.standard.string(forKey: "appliedResetEpoch") != epoch {
-            recent.clear(); packOrder.reset(); selectionStore.save(.all); selection = .all
-            UserDefaults.standard.set(epoch, forKey: "appliedResetEpoch")
-        }
+        state.applyAppResetIfNeeded()
         presentationActive = true
         loadGeneration += 1
         loadTask?.cancel()
@@ -260,14 +241,9 @@ final class KeyboardViewController: UIInputViewController,
             cancelPaging()
             needsRevealSelectedTab = true
             updateContentMetrics()
-            let selectionChanged = selection != selectionStore.selection
-            selection = selectionStore.selection
-            let historyChanged = recent.reload()
-            let orderChanged = packOrder.reload()
-            if !restoreInitialLibrary(), selectionChanged || historyChanged || orderChanged {
-                let byID = Dictionary(uniqueKeysWithValues: libraryPacks.map { ($0.id, $0) })
-                packs = packOrder.orderedIDs(available: libraryPacks.map(\.id), prune: canPruneHistory).compactMap { byID[$0] }
-                reconcileSelection()
+            let preferencesChanged = state.reloadPreferences()
+            if !restoreInitialLibrary(), preferencesChanged {
+                state.restorePackOrder()
                 prewarmFirstFrame()
                 applySelection()
             }

@@ -27,7 +27,7 @@
 - [M1 설치, 검증 명령, 실기기 결과표](docs/Milestone1-Validation.md)
 - `Shared`: 앱·키보드 공통 제품 모델·이미지 처리·저장소 읽기·복사 코드.
 - `StickerSamples`: 두 타깃에 번들되는 자체 제작 샘플 정의·PNG. App Group 저장소가 아닙니다.
-- `TelegramSticker/Networking`: 클라이언트 HTTP·세션. 서버 서비스는 `backend/worker/src/services`에서 관리합니다.
+- `TelegramSticker/Core/Networking`: 클라이언트 HTTP·세션. 서버 서비스는 `backend/worker/src/features`에서 관리합니다.
 - `Scripts/GenerateSampleStickers.swift`: macOS CoreGraphics로 테스트 PNG 3장을 재생성합니다. 외부 의존성이 없습니다.
 
 샘플 PNG는 이 프로젝트에서 직접 제작한 기하학적 테스트 이미지이며 CC0-1.0으로 제공합니다. Telegram의 스티커를 재배포하지 않습니다.

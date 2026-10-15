@@ -18,12 +18,14 @@ pnpm check:bundle
 ## 서버 코드 구조
 
 - `src/index.ts`: Worker 진입점과 기존 `createHandler` export.
-- `src/routes/`: 인증 이후 라우팅, 갤러리·팩·파일 요청 조율.
-- `src/services/`: Telegram 연동, 팩 정규화, 파일 스트리밍, 해시.
-- `src/auth/`, `src/cache/`, `src/validation/`, `src/http/`: 서버 인증·캐시·검증·응답 형식.
-- `src/types.ts`: Worker binding·요청별 런타임·내부 저장 타입.
+- `src/app.ts`: 서버 설정·인증·라우팅·공통 오류 처리.
+- `src/features/packs/`: 팩·파일 API, 팩 정규화·검증·파일 스트리밍.
+- `src/features/gallery/`: 추천 카탈로그 API.
+- `src/features/sessions/`: 세션 발급·검증·접근키 인증.
+- `src/integrations/telegram/`: Telegram API 호출·파일 다운로드·응답 크기 제한.
+- `src/platform/`: 공통 HTTP 응답·캐시·해시·검증·Worker 타입.
 
-클라이언트의 Worker 요청 코드는 저장소 루트의 `TelegramSticker/Networking/`에 있습니다.
+클라이언트의 Worker 요청 코드는 저장소 루트의 `TelegramSticker/Core/Networking/`에 있습니다.
 서버 내부 파일 ID·Bot Token은 이 HTTP 경계를 넘기지 않습니다.
 전체 구조는 [File-structure.md](../../File-structure.md)를 참고하세요.
 

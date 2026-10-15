@@ -127,6 +127,7 @@ final class ImportModel: Identifiable {
         busy = true; message = nil; downloadSummary = "준비 중"
         operation = Task {
             await DownloadDiagnostics.shared.run(title: (restoringOriginal ? "원본 복원" : updating ? "팩 업데이트" : "팩 다운로드") + " · " + pack.name) {
+                await GalleryPreviewStore.shared.cancelForForegroundWork()
                 backgroundID = await BackgroundWork.shared.begin(kind: restoringOriginal ? .restoreOriginal : updating ? .update : .download, title: updating ? "스티커 팩 업데이트 확인" : "스티커 설치") { self.cancel() }
                 var success = false
                 defer { BackgroundWork.shared.end(id: backgroundID, success: success, detail: completionDetail, cancelled: Task.isCancelled); backgroundID = nil; busy = false }
@@ -164,6 +165,7 @@ final class ImportModel: Identifiable {
         busy = true; message = nil; pack = nil; progress = nil; result = nil
         operation = Task {
             await DownloadDiagnostics.shared.run(title: restoringOriginal ? "원본 일괄 복원" : updating ? "팩 일괄 업데이트" : "팩 일괄 다운로드") {
+                await GalleryPreviewStore.shared.cancelForForegroundWork()
                 backgroundID = await BackgroundWork.shared.begin(kind: restoringOriginal ? .restoreOriginal : updating ? .update : .download, title: restoringOriginal ? "스티커 원본 복원" : (updating ? "스티커 팩 일괄 업데이트 확인" : "스티커 팩 일괄 설치")) { self.cancel() }
                 var success = false
                 defer { BackgroundWork.shared.end(id: backgroundID, success: success, detail: completionDetail, cancelled: Task.isCancelled); backgroundID = nil; busy = false }

@@ -14,7 +14,9 @@
 
 - Before working, read [File-structure.md](File-structure.md) at the repository root to identify current file locations, responsibilities, and target boundaries.
 - Follow the current responsibility-based layout documented there. Keep file moves and behavior changes distinct, and preserve target and runtime storage boundaries.
-- Keep iOS client code and server backend code separate. Client HTTP requests belong to the app's networking code; Telegram API integration, server authentication, server caching, and server services belong under `backend/worker/`.
+- Keep feature-local code together in `Features/`. Use `Core/` for app code reused across features, `UI/` for reusable views, and `Shared/` only for production code used by both the app and keyboard. Avoid empty layers and unnecessary packages.
+- Keep iOS client code and server backend code separate. Client HTTP requests belong to the app's `Core/Networking/` code; Telegram API integration, server authentication, server caching, and server services belong under `backend/worker/`.
+- Keep keyboard library, selection, history, and ordering state in `StickerKeyboard/State/KeyboardState.swift`. Views and interaction handlers must use its methods rather than mutate stored state directly. Keep UIKit lifecycle and animation tasks in the controller.
 - `Shared/` is shared by the iOS app and keyboard, not by the client and backend. Do not link networking, import orchestration, TGS/WebM conversion, Lottie, or StickerVP9 into the keyboard extension.
 - Publish installed library changes through the main app's `LibraryWriter`. Preserve existing user data paths, revision publication, and path validation when reorganizing source files.
 - When adding, moving, or deleting files or changing their responsibilities or target membership, update `File-structure.md` in the same task and verify Xcode target membership and resource lookup paths.

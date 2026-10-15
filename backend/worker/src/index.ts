@@ -1,5 +1,5 @@
-import type { Env, Context, WorkerCache } from './types.ts';
-import { createHandler } from './routes/handler.ts';
+import type { Env, Context, WorkerCache } from './platform/types.ts';
+import { createHandler } from './app.ts';
 
 export { createHandler };
 
