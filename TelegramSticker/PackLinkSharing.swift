@@ -10,7 +10,7 @@ nonisolated struct StickerLinkFile: Transferable {
     let text: String
     static var transferRepresentation: some TransferRepresentation {
         DataRepresentation(exportedContentType: .stickerBridgeLinks) { Data($0.text.utf8) }
-            .suggestedFileName("StickerBridge-Links.stickerlinks")
+            .suggestedFileName("LinkList.stickerlinks")
     }
 }
 
@@ -48,13 +48,30 @@ struct PackLinkShareMenu: View {
     var body: some View {
         Menu {
             ShareLink(item: links.joined(separator: "\n")) {
-                Label("Telegram 링크 공유", systemImage: "link")
+                Label("Sticker Pack 링크 공유", systemImage: "link")
             }
             ShareLink(item: StickerLinkFile(text: links.joined(separator: "\n")), preview: SharePreview("Telegram 스티커 팩 링크 목록")) {
                 Label("링크 목록 파일 공유", systemImage: "doc")
             }
         } label: { Label(title, systemImage: "square.and.arrow.up") }
             .disabled(links.isEmpty)
+    }
+}
+
+struct PackLinksShareView: View {
+    let links: [String]
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List {
+                ShareLink(item: links.joined(separator: "\n")) { Label("Sticker Pack 링크 공유", systemImage: "link") }
+                ShareLink(item: StickerLinkFile(text: links.joined(separator: "\n")), preview: SharePreview("스티커 팩 링크 목록")) {
+                    Label("링크 목록 파일 공유", systemImage: "doc")
+                }
+            }
+            .navigationTitle("팩 공유").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("닫기") { dismiss() } } }
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 // No runtime packages. Secrets are provided only through Worker bindings.
 interface Limiter { limit(options: { key: string }): Promise<{ success: boolean }> }
-interface Env { BOT_TOKEN: string; ACCESS_KEY: string; PUBLIC_IMPORT_ENABLED?: string; PACK_LIMIT: Limiter; ASSET_LIMIT: Limiter }
+interface GalleryKV { get(key: string, options: { cacheTtl: number }): Promise<string | null> }
+interface Env { GALLERY_CATALOG?: GalleryKV; BOT_TOKEN: string; ACCESS_KEY: string; PUBLIC_IMPORT_ENABLED?: string; PACK_LIMIT: Limiter; ASSET_LIMIT: Limiter }
 interface WorkerCache { match(key: Request): Promise<Response | undefined>; put(key: Request, value: Response): Promise<void> }
 interface Context { waitUntil(promise: Promise<unknown>): void }
 interface Runtime { fetch: typeof fetch; cache?: WorkerCache }
@@ -58,6 +59,27 @@ async function validSession(request: Request, secret: string): Promise<boolean> 
   if (remaining <= 0 || remaining > 3600) return false;
   const signature = Uint8Array.from(match[3].match(/../g)!, byte => parseInt(byte, 16));
   return crypto.subtle.verify('HMAC', await sessionKey(secret), signature, new TextEncoder().encode(match[1]));
+}
+async function gallery(env: Env): Promise<Response> {
+  if (!env.GALLERY_CATALOG) throw new APIError(503, 'gallery_not_configured');
+  const text = await env.GALLERY_CATALOG.get('recommended-packs', { cacheTtl: 60 });
+  if (text === null) throw new APIError(503, 'gallery_not_configured');
+  if (new TextEncoder().encode(text).length > 65536) throw new APIError(503, 'gallery_catalog_invalid');
+  const names: string[] = [];
+  for (const line of text.split(/\r?\n/).map(v => v.trim()).filter(Boolean)) {
+    let url: URL;
+    try { url = new URL(line); } catch { throw new APIError(503, 'gallery_catalog_invalid'); }
+    const match = /^\/addstickers\/([A-Za-z0-9_]{1,64})\/?$/.exec(url.pathname);
+    if (url.protocol !== 'https:' || !['t.me', 'telegram.me'].includes(url.hostname) ||
+        url.username || url.password || url.port || url.search || url.hash || !match) {
+      throw new APIError(503, 'gallery_catalog_invalid');
+    }
+    const name = match[1].toLowerCase();
+    if (!names.includes(name)) names.push(name);
+    if (names.length > 200) throw new APIError(503, 'gallery_catalog_invalid');
+  }
+  return json({ schemaVersion: 1, revision: await digest(names.join('\n')),
+    packs: names.map(name => ({ name, link: `https://t.me/addstickers/${name}` })) });
 }
 function json(value: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(value), { status, headers: {
@@ -172,6 +194,13 @@ export function createHandler(runtime: Runtime) {
           !(publicSessions && await validSession(request, env.ACCESS_KEY))) throw new APIError(401, 'unauthorized');
       if (request.method !== 'GET') throw new APIError(405, 'method_not_allowed');
       const url = new URL(request.url);
+      if (url.pathname === '/v1/gallery') {
+        if (url.search || url.hash) throw new APIError(400, 'invalid_request');
+        const key = request.headers.get('cf-connecting-ip') ?? 'local';
+        if (!(await env.PACK_LIMIT.limit({ key })).success) throw new APIError(429, 'rate_limited', true, 60);
+        stage = 'gallery';
+        return await gallery(env);
+      }
       const match = /^\/v1\/packs\/([A-Za-z0-9_]{1,64})(?:\/assets\/([a-f0-9]{64}))?$/.exec(url.pathname);
       if (!match || url.hash) throw new APIError(400, 'invalid_request');
       const name = match[1].toLowerCase(), assetID = match[2];

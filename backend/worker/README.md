@@ -68,3 +68,23 @@ ACCESS_KEY 교체 시 기존 세션은 무효화되며 앱이 새 세션을 발�
 
 이번 변경의 확인 범위: Simulator 앱 빌드와 TypeScript 타입 검사. 테스트 및 실제 신규 설치
 가져오기 흐름은 실행하지 않았습니다.
+
+
+## 원격 추천 목록 관리
+
+Cloudflare Dashboard → Storage & databases → KV → **GALLERY_CATALOG** → KV Pairs에서
+**recommended-packs**의 값을 편집합니다. 한 줄에 `https://t.me/addstickers/<name>` 하나씩
+넣고 저장하세요. 줄 순서가 갤러리 순서이며 같은 팩은 처음 한 번만 표시됩니다.
+추가/삭제/정렬에 앱 또는 Worker 재배포가 필요하지 않습니다.
+
+- 모두 숨기려면 값을 빈 문자열로 저장합니다. 키 자체를 삭제하면 설정 오류로 처리됩니다.
+- JSON이나 쉼표 목록이 아니라 줄바꿈으로 구분한 링크 목록입니다.
+- 잘못된 링크가 포함되면 서버는 gallery_catalog_invalid를 반환하고 앱은 마지막 정상 목록을 유지합니다.
+- 앱에서 갤러리를 당겨 새로고침할 수 있습니다. KV 전파/캐시 때문에 60초 이상 걸릴 수 있습니다.
+- `/v1/gallery`는 기존 서비스 이용 토큰 인증 및 PACK_LIMIT을 적용합니다.
+- 새로운 KV namespace를 다시 구성할 때는 wrangler.jsonc의 GALLERY_CATALOG binding을 연결하고
+  recommended-packs 키를 먼저 등록해야 합니다. 기존 팩 API는 KV 장애와 관계없이 유지됩니다.
+
+2026-10-15 생성 namespace: fcb899c9239c42319083ddb5b260089a.
+배포 버전: 6b5f341f-d99b-46cf-b737-46468650ad0a.
+배포 후 실제 `/v1/gallery` 응답에서 초기 11개 링크의 개수와 순서를 확인했습니다.

@@ -172,6 +172,18 @@ actor LibraryWriter {
         try publish(JSONEncoder().encode(index), reader.file("index.json"))
     }
 
+    func resetLibrary() throws {
+        // Publish the empty library first. A retained keyboard never sees half a deleted index.
+        try FileManager.default.createDirectory(at: reader.root, withIntermediateDirectories: true)
+        var index = LibraryIndexV1()
+        index.cacheGeneration = UUID().uuidString
+        try publish(JSONEncoder().encode(index), reader.file("index.json"))
+        for name in ["packs", "staging"] {
+            let url = try reader.file(name)
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        }
+    }
+
     func delete(id: String) throws {
         var index = try reader.index()
         guard index.packs.contains(where: { $0.id == id }) else { return }

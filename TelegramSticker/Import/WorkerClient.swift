@@ -51,6 +51,10 @@ private actor ImportServiceSession {
             return credential.token
         } catch { pending[origin] = nil; throw error }
     }
+    func reset() {
+        for task in pending.values { task.cancel() }
+        pending.removeAll(); credentials.removeAll()
+    }
     func invalidate(origin: URL, token: String) {
         if credentials[origin]?.token == token { credentials[origin] = nil }
     }
@@ -65,11 +69,18 @@ actor WorkerClient {
         if let session { self.session = session } else {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 45
-            config.timeoutIntervalForResource = 120
+            config.timeoutIntervalForResource = 600
             config.httpShouldSetCookies = false
             config.urlCache = nil
             self.session = URLSession(configuration: config, delegate: RejectRedirects(), delegateQueue: nil)
         }
+    }
+    static func resetServiceSession() async { await ImportServiceSession.shared.reset() }
+    func gallery() async throws -> RemoteGallery {
+        let data = try await request(path: "/v1/gallery")
+        let catalog = try JSONDecoder().decode(RemoteGallery.self, from: data)
+        try catalog.validate()
+        return catalog
     }
     func pack(name: String, refresh: Bool = false) async throws -> RemotePack {
         guard StickerLink.validName(name) else { throw StickerImportError.invalidLink }
@@ -85,7 +96,7 @@ actor WorkerClient {
         guard StickerLink.validName(pack), sticker.id.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
             throw StickerImportError.invalidResponse
         }
-        if !thumbnail && (sticker.fileSize ?? 0) > 20 * 1024 * 1024 { throw StickerImportError.tooLarge }
+        if !thumbnail && (sticker.fileSize ?? 0) > 20 * 1024 * 1024 { throw ImportLimitFailure(check: "telegram_declared_bytes", actual: String(sticker.fileSize ?? 0), limit: "20971520 bytes") }
         return try await request(path: "/v1/packs/\(pack)/assets/\(sticker.id)", variant: thumbnail ? "thumbnail" : "original")
     }
     func assetFile(pack: String, sticker: RemoteSticker, destination: URL) async throws -> URL {
@@ -111,6 +122,7 @@ actor WorkerClient {
         // and conversion together. Avoid multiplying five retries at both levels.
         let maximumRetries = path.contains("/assets/") ? 0 : 5
         for attempt in 0...maximumRetries {
+            try await BackgroundWork.shared.waitForExecution()
             try await requests.acquire()
             do {
                 try await DownloadRequestBudget.shared.wait(asset: path.contains("/assets/"))
@@ -137,7 +149,7 @@ actor WorkerClient {
                     }
                 } else { description = error.localizedDescription }
                 let action = delay.map { " · \(Int(ceil($0)))초 뒤 자동 재시도 (\(attempt + 1)/5)" } ?? (maximumRetries == 0 ? " · 항목 재시도 처리로 전달" : (attempt == maximumRetries ? " · 5회 재시도 종료" : " · 재시도 불가"))
-                await DownloadDiagnostics.shared.record(path + " · " + description + action)
+                await DownloadDiagnostics.shared.record(path + " · " + description + action + " · " + DownloadDiagnostics.errorDetails(error))
                 guard let delay else {
                     if error is URLError { throw StickerImportError.network }
                     throw error
@@ -148,11 +160,13 @@ actor WorkerClient {
         throw StickerImportError.network
     }
     private func perform(_ url: URL, renewSession: Bool = true) async throws -> URL {
+        try await BackgroundWork.shared.waitForExecution()
         var request = URLRequest(url: url)
         let token = configuration.accessKey.isEmpty
             ? try await ImportServiceSession.shared.token(origin: configuration.origin, session: session)
             : configuration.accessKey
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let started = ContinuousClock.now
         let (file, response) = try await session.download(for: request)
         guard let response = response as? HTTPURLResponse else {
             try? FileManager.default.removeItem(at: file); throw StickerImportError.invalidResponse
@@ -163,8 +177,11 @@ actor WorkerClient {
             return try await perform(url, renewSession: false)
         }
         let limit = url.path.contains("/assets/") ? 20 * 1024 * 1024 : 2 * 1024 * 1024
-        guard (try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max) <= limit else {
-            try? FileManager.default.removeItem(at: file); throw StickerImportError.tooLarge
+        let actualSize = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
+        await DownloadDiagnostics.shared.record("HTTP path=\(url.path) variant=\(url.query ?? "none") status=\(response.statusCode) contentType=\(response.value(forHTTPHeaderField: "Content-Type") ?? "unknown") declaredBytes=\(response.value(forHTTPHeaderField: "Content-Length") ?? "unknown") receivedBytes=\(actualSize) limitBytes=\(limit) elapsed=\(started.duration(to: .now)) retryAfter=\(response.value(forHTTPHeaderField: "Retry-After") ?? "none") cfRay=\(response.value(forHTTPHeaderField: "CF-Ray") ?? "none")")
+        guard actualSize <= limit else {
+            try? FileManager.default.removeItem(at: file)
+            throw ImportLimitFailure(check: url.path.contains("/assets/") ? "download_asset_bytes" : "download_metadata_bytes", actual: String(actualSize), limit: "\(limit) bytes")
         }
         guard response.statusCode == 200 else {
             defer { try? FileManager.default.removeItem(at: file) }

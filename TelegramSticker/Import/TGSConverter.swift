@@ -58,7 +58,9 @@ enum TGSConverter {
         var pending: [Any] = [object], nodes = 0
         while let value = pending.popLast() {
             nodes += 1
-            guard nodes <= 100_000 else { throw StickerImportError.tooLarge }
+            // peepo_pepe/😎 is a valid 49,200-byte TGS with 181,917 JSON values.
+            // Keep a bounded graph budget alongside the independent 2 MiB inflate cap.
+            guard nodes <= 250_000 else { throw ImportLimitFailure(check: "tgs_json_nodes", actual: String(nodes), limit: "250000 nodes") }
             if let dictionary = value as? [String: Any] {
                 if dictionary["p"] is String || dictionary["u"] is String ||
                     [2, 5].contains(dictionary["ty"] as? Int ?? -1) {
@@ -67,6 +69,7 @@ enum TGSConverter {
                 pending.append(contentsOf: dictionary.values)
             } else if let values = value as? [Any] { pending.append(contentsOf: values) }
         }
+        DownloadDiagnostics.shared.record("TGS_PREFLIGHT compressedBytes=\(data.count) inflatedBytes=\(json.count) nodes=\(nodes) nodeLimit=250000 inflateLimit=2097152 dimensions=\(width)x\(height) sourceFPS=\(rate) duration=\((end - start) / rate)s quality=\(quality.label)")
         let animation = try LottieAnimation.from(data: json)
         let view = LottieAnimationView(animation: animation, configuration: LottieConfiguration(renderingEngine: .mainThread))
         let scale = min(1, Double(quality.pixels) / Double(max(width, height)))
@@ -86,12 +89,13 @@ enum TGSConverter {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1; format.opaque = false
         let renderer = UIGraphicsImageRenderer(size: view.bounds.size, format: format)
-        var processing = Duration.zero
+        var processing = 0.0
         var poster: Data?
         for index in 0..<count {
+            try await BackgroundWork.shared.waitForExecution()
             try Task.checkCancellation()
-            guard processing < .seconds(45) else { throw StickerImportError.conversionTimeout }
-            let frameStart = ContinuousClock.now
+            guard processing < 45 else { throw StickerImportError.conversionTimeout }
+            let frameStart = ProcessingCPUClock.seconds
             try autoreleasepool {
                 view.currentFrame = start + (end - start) * Double(index) / Double(count)
                 view.forceDisplayUpdate()
@@ -116,7 +120,7 @@ enum TGSConverter {
                     kCGImagePropertyGIFDelayTime: delay, kCGImagePropertyGIFUnclampedDelayTime: delay
                 ]] as CFDictionary)
             }
-            processing += frameStart.duration(to: .now)
+            processing += max(0, ProcessingCPUClock.seconds - frameStart)
             await Task.yield()
         }
         guard CGImageDestinationFinalize(destination), let poster, PNGValidation.isValid(poster),

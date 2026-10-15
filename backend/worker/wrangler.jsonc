@@ -2,10 +2,34 @@
   "name": "stickerbridge",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-13",
-  "vars": { "PUBLIC_IMPORT_ENABLED": "true" },
-  "observability": { "enabled": false },
+  "vars": {
+    "PUBLIC_IMPORT_ENABLED": "true"
+  },
+  "observability": {
+    "enabled": false
+  },
   "ratelimits": [
-    { "name": "PACK_LIMIT", "namespace_id": "73001", "simple": { "limit": 20, "period": 60 } },
-    { "name": "ASSET_LIMIT", "namespace_id": "73002", "simple": { "limit": 240, "period": 60 } }
+    {
+      "name": "PACK_LIMIT",
+      "namespace_id": "73001",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
+    },
+    {
+      "name": "ASSET_LIMIT",
+      "namespace_id": "73002",
+      "simple": {
+        "limit": 240,
+        "period": 60
+      }
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "GALLERY_CATALOG",
+      "id": "fcb899c9239c42319083ddb5b260089a"
+    }
   ]
 }

@@ -45,7 +45,7 @@ actor ImportCoordinator {
         let file = root.appendingPathComponent("batch-draft.json")
         if draft.links.isEmpty { try? FileManager.default.removeItem(at: file); return }
         let data = try JSONEncoder().encode(draft)
-        guard data.count <= 256 * 1024 else { throw StickerImportError.tooLarge }
+        guard data.count <= 256 * 1024 else { throw ImportLimitFailure(check: "batch_draft_bytes", actual: String(data.count), limit: "262144 bytes") }
         try data.write(to: file, options: .atomic)
     }
     func batchDraft(for origin: URL) throws -> BatchImportDraft? {
@@ -161,7 +161,7 @@ actor ImportCoordinator {
         var failures = await ImportFailureStore.shared.load(name: pack.name)
         failures.removeAll { !requestedIDs.contains($0.id) }
         for id in requestedIDs where !pack.stickers.contains(where: { $0.id == id }) && !failures.contains(where: { $0.id == id }) {
-            failures.append(ImportFailure(id: id, format: "unknown", stage: "조회", code: "asset_unavailable", message: "원본 팩에서 항목을 찾을 수 없어요. 팩 업데이트로 목록을 다시 맞출 수 있어요.", retryable: false))
+            failures.append(ImportFailure(id: id, format: "unknown", stage: "조회", code: "asset_unavailable", message: "원본 팩에서 항목을 찾을 수 없어요. 팩 업데이트 확인로 목록을 다시 맞출 수 있어요.", retryable: false))
         }
         let candidateIDs = Set(candidates.map(\.id))
         failures.removeAll { candidateIDs.contains($0.id) }
@@ -178,7 +178,11 @@ actor ImportCoordinator {
                     let animated = sticker.format != "static"
                     // Initial download plus at most five complete re-downloads.
                     for retryAttempt in 0...5 {
+                        try await BackgroundWork.shared.waitForExecution()
                         var stage = "다운로드"
+                        let attemptStarted = ContinuousClock.now
+                        var receivedBytes: Int?
+                        var fileMagic = "unknown"
                         do {
                             if FileManager.default.fileExists(atPath: output.path),
                                let data = try? Data(contentsOf: output, options: .mappedIfSafe), PNGValidation.isValid(data) {
@@ -194,7 +198,11 @@ actor ImportCoordinator {
                             try await Self.conversionGate.acquire()
                             defer { Task { await Self.conversionGate.release() } }
                             try Task.checkCancellation()
+                            try await BackgroundWork.shared.waitForExecution()
                             let original = try Data(contentsOf: source, options: .mappedIfSafe)
+                            receivedBytes = original.count
+                            fileMagic = original.prefix(16).map { String(format: "%02x", $0) }.joined()
+                            await DownloadDiagnostics.shared.record("PIPELINE pack=\(pack.name) stickerID=\(sticker.id) format=\(sticker.format) dimensions=\(sticker.width)x\(sticker.height) declaredBytes=\(sticker.fileSize.map(String.init) ?? "unknown") receivedBytes=\(original.count) magic16=\(fileMagic) attempt=\(retryAttempt + 1)/6 stage=convert")
                             try Task.checkCancellation()
                             stage = "변환"
                             let png: Data
@@ -208,6 +216,7 @@ actor ImportCoordinator {
                                         if index > 0 { qualityLabel = quality.label }
                                         break
                                     } catch {
+                                        await DownloadDiagnostics.shared.record("CONVERSION pack=\(pack.name) stickerID=\(sticker.id) quality=\(quality.label) " + DownloadDiagnostics.errorDetails(error))
                                         let resourceFailure = isConversionTimeout(error) ||
                                             [WebMConversionFailure.deadline, .image, .output].contains(error as? WebMConversionFailure ?? .bitstream)
                                         guard resourceFailure, index < AnimationQuality.fallback.count - 1 else { throw error }
@@ -227,9 +236,10 @@ actor ImportCoordinator {
                         catch {
                             if Task.isCancelled { throw CancellationError() }
                             let failure = ImportFailure.record(sticker: sticker, stage: stage, error: error)
-                            let action = retryAttempt < 5 ? "자동 재다운로드 \(retryAttempt + 1)/5" : "5회 재시도 종료"
-                            await DownloadDiagnostics.shared.record("\(pack.name)/\(sticker.id.prefix(12)) · \(stage) · \(failure.code) · \(failure.message) · \(action)")
-                            if retryAttempt == 5 { return DownloadOutcome(sticker: sticker, file: nil, bytes: 0, failure: failure) }
+                            let stopForLimit = error is ImportLimitFailure
+                            let action = stopForLimit ? "확정된 제한 초과 · 자동 반복 중지" : retryAttempt < 5 ? "자동 재다운로드 \(retryAttempt + 1)/5" : "5회 재시도 종료"
+                            await DownloadDiagnostics.shared.record("FAIL pack=\(pack.name) code=\(failure.code) attempt=\(retryAttempt + 1)/6 elapsed=\(attemptStarted.duration(to: .now)) receivedBytes=\(receivedBytes.map(String.init) ?? "unknown") magic16=\(fileMagic) action=\(action) " + (failure.technicalDetails ?? failure.message))
+                            if retryAttempt == 5 || stopForLimit { return DownloadOutcome(sticker: sticker, file: nil, bytes: 0, failure: failure) }
                             var seconds = min(30.0, pow(2.0, Double(retryAttempt + 1)))
                             if case let StickerImportError.server(_, _, retryAfter) = error { seconds = max(seconds, Double(retryAfter)) }
                             try await Task.sleep(for: .seconds(seconds + Double.random(in: 0.2...1.5)))
@@ -279,6 +289,8 @@ actor ImportCoordinator {
         }
         if pending.isEmpty { try? FileManager.default.removeItem(at: directory) }
         if pending.isEmpty { try? FileManager.default.removeItem(at: root.appendingPathComponent("draft.json")) }
+        await progress(ImportProgress(completed: updating ? pack.stickers.count : previousCount + finished.count,
+                                      total: total, failed: pending.count, applied: pending.isEmpty))
         return ImportResult(installed: updating ? pack.stickers.count : previousCount + finished.count, total: total, failed: pending.count)
     }
 }

@@ -3,7 +3,7 @@ import ImageIO
 import UniformTypeIdentifiers
 
 nonisolated enum StorageOptimizationProfile: String, CaseIterable, Identifiable, Sendable, Hashable {
-    case balanced, compact
+    case compact, balanced
     var id: String { rawValue }
     var pixels: Int { self == .balanced ? 384 : 256 }
     var fps: Int { self == .balanced ? 24 : 15 }
@@ -99,7 +99,7 @@ extension LibraryWriter {
                     if !retainOldRevisions { try FileManager.default.removeItem(at: oldDirectory) }
                     result.saved += max(0, before - after)
                 } catch {
-                    result.failures.append("\(pack.title): 최적화는 완료했지만 이전 파일을 정리하지 못했어요. 캐시 삭제로 다시 정리해 주세요.")
+                    result.failures.append("\(pack.title): 용량 최적화는 완료했지만 이전 파일을 정리하지 못했어요. 캐시 삭제로 다시 정리해 주세요.")
                 }
             } catch is CancellationError { throw CancellationError() }
             catch StorageOptimizationError.noSavings { continue }

@@ -10,6 +10,8 @@ import SwiftUI
 @main
 struct TelegramStickerApp: App {
     init() {
+        _ = WorkNotifications.shared
+        _ = KeyboardAccessMonitor.shared
         // Capture only files left by the previous process, before any new comparison starts.
         let temporary = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
         let stale = ((try? FileManager.default.contentsOfDirectory(at: temporary, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? [])

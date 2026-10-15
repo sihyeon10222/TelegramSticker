@@ -25,7 +25,7 @@ final class OptimizationCenter {
 final class OptimizationSession: Identifiable {
     let id = UUID()
     let request: OptimizationRequest
-    var profile = StorageOptimizationProfile.balanced
+    var profile = StorageOptimizationProfile.compact
     var running = false
     var applying = false
     var finished = false
@@ -36,6 +36,7 @@ final class OptimizationSession: Identifiable {
     var sourceLinks: [String] = []
     private var drafts: [StorageOptimizationProfile: PreparedOptimization] = [:]
     private var operation: Task<Void, Never>?
+    private var progressGeneration = UUID()
     var draft: PreparedOptimization? { drafts[profile] }
     private var jobs: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ImportJobs") }
     init(request: OptimizationRequest) {
@@ -83,25 +84,27 @@ final class OptimizationSession: Identifiable {
         let selectedProfile = profile
         let selectedDraft = draft
         running = true; applying = apply; progress = 0; message = nil
+        let generation = UUID(); progressGeneration = generation
         ImportActivity.shared.count += 1
         operation = Task {
-            let id = await BackgroundWork.shared.begin(title: apply ? "스티커 최적화 적용" : "스티커 최적화 비교 준비") { self.cancel() }
+            let id = await BackgroundWork.shared.begin(kind: apply ? .optimizationApply : .optimizationPreparation, title: apply ? "스티커 용량 최적화 적용" : "스티커 용량 최적화 비교 준비") { self.cancel() }
             var success = false
             defer {
                 running = false; ImportActivity.shared.count -= 1
-                BackgroundWork.shared.end(id: id, success: success)
+                BackgroundWork.shared.end(id: id, success: success, detail: message, cancelled: Task.isCancelled)
             }
             do {
                 guard let writer = LibraryWriter.shared else { throw LibraryError.unavailable }
                 let report: @Sendable (Int, Int) -> Void = { done, total in
                     Task { @MainActor in
-                        self.progress = Double(done) / Double(max(1, total))
+                        guard self.running, self.progressGeneration == generation else { return }
+                        self.progress = min(0.99, Double(done) / Double(max(1, total)))
                         BackgroundWork.shared.report(id: id, completed: Int64(done), total: Int64(max(1, total)), subtitle: "처리 \(done)/\(total) · \(Int(self.progress * 100))%")
                     }
                 }
                 if apply, let selectedDraft {
                     let result = try await ImportJobCache.shared.applyOptimization(root: jobs, writer: writer, draft: selectedDraft, progress: report)
-                    success = result.failures.isEmpty; finished = true; progress = 1
+                    success = result.failures.isEmpty; finished = true; progress = success ? 1 : min(progress, 0.99)
                     ImportActivity.shared.libraryChangeID += 1
                     message = "\(result.optimizedPacks)개 팩 반영 · \(ByteCountFormatter.string(fromByteCount: result.saved, countStyle: .file)) 절약" + (result.failures.isEmpty ? "" : "\n" + result.failures.joined(separator: "\n"))
                     // The source revisions changed; other profiles must not overwrite them.
@@ -115,7 +118,10 @@ final class OptimizationSession: Identifiable {
                     success = true; progress = 1
                     if prepared.saved == 0 { message = "현재 품질에서는 더 줄일 용량이 없어요. 원본을 유지해요." }
                 }
+                progressGeneration = UUID()
+                if success { BackgroundWork.shared.report(id: id, completed: 1, total: 1, subtitle: apply ? "용량 최적화 적용 완료 · 100%" : "비교 준비 완료 · 100%", finalized: true) }
             } catch {
+                progressGeneration = UUID()
                 message = error is CancellationError ? "중단했어요. 완료된 팩은 유지하고, 처리 중인 팩의 기존 파일은 보존해요." : error.localizedDescription
             }
         }
@@ -149,7 +155,7 @@ struct OptimizationView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    Picker("최적화 품질", selection: $model.profile) {
+                    Picker("용량 최적화 품질", selection: $model.profile) {
                         ForEach(StorageOptimizationProfile.allCases) { Text($0.title).tag($0) }
                     }.pickerStyle(.segmented).disabled(model.running || model.finished)
                     Text("최대 \(model.profile.pixels)px · GIF 최대 \(model.profile.fps)fps. 작은 원본은 확대하지 않고, 더 작아진 파일만 적용해요.")
@@ -166,7 +172,7 @@ struct OptimizationView: View {
                                 Text(item.original.detail + " · " + item.original.name).font(.headline)
                                 HStack(spacing: 8) {
                                     comparison(item.original, title: "원본", size: item.before)
-                                    comparison(item.optimized, title: "최적화", size: item.after)
+                                    comparison(item.optimized, title: "용량 최적화", size: item.after)
                                 }.accessibilityIdentifier("optimizationComparison")
                                 Text("이 항목 절약 \(bytes(max(0, item.before - item.after))) (PNG·GIF 합계)").font(.caption).foregroundStyle(.secondary)
                             }
@@ -191,7 +197,7 @@ struct OptimizationView: View {
                                 if model.running {
                                     HStack {
                                         ProgressView().controlSize(.small)
-                                        Text(model.applying ? "최적화 버전 적용 중" : "비교 버전 만드는 중").font(.subheadline.bold())
+                                        Text(model.applying ? "용량 최적화 버전 적용 중" : "비교 버전 만드는 중").font(.subheadline.bold())
                                         Spacer()
                                         Text("\(Int(model.progress * 100))%").monospacedDigit()
                                         Button("중단") { model.cancel() }.buttonStyle(.glass)
@@ -210,7 +216,7 @@ struct OptimizationView: View {
                             }.padding(16).glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24))
                             if !model.finished {
                                 Button { model.start(apply: true) } label: {
-                                    Text("최적화 버전 \(draft.comparisons.count)개 일괄 적용").frame(maxWidth: .infinity).lineLimit(1)
+                                    Text("용량 최적화 버전 \(draft.comparisons.count)개 일괄 적용").frame(maxWidth: .infinity).lineLimit(1)
                                 }.buttonStyle(.glassProminent).controlSize(.large)
                                     .disabled(model.running || draft.saved == 0 || ImportActivity.shared.count > 0).accessibilityIdentifier("applyOptimization")
                             }
@@ -228,6 +234,7 @@ struct OptimizationView: View {
                 }.padding(.horizontal, 16).padding(.vertical, 12)
             }
             .navigationTitle("용량 최적화").navigationBarTitleDisplayMode(.inline)
+            .modifier(KeyboardPermissionReminder(working: model.running))
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(model.running ? "작업 유지하고 닫기" : "닫기") { dismiss() }.accessibilityIdentifier("closeOptimization") } }
             .sheet(item: $model.restoreImport) { ImportView(model: $0) }
             .onAppear { model.selectProfile() }

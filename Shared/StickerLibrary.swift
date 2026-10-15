@@ -6,7 +6,7 @@ nonisolated enum LibraryError: Error, LocalizedError {
         switch self {
         case .unavailable: "공유 저장소에 접근할 수 없어요. 앱과 키보드의 App Group 서명을 확인해 주세요."
         case .invalidIndex: "스티커 목록을 읽을 수 없어요. 기존 파일은 보존했어요."
-        case .unsupportedVersion: "더 새로운 스티커 저장소 형식이에요. 앱을 업데이트해 주세요."
+        case .unsupportedVersion: "더 새로운 스티커 저장소 형식이에요. 최신 버전의 앱을 설치해 주세요."
         case .unsafePath: "안전하지 않은 파일 경로를 차단했어요."
         case .duplicatePack: "이미 설치한 팩이에요."
         case .invalidImage: "손상되었거나 지원하지 않는 PNG·GIF예요."
@@ -202,5 +202,52 @@ nonisolated struct LibraryReader: Sendable {
         let data = try Data(contentsOf: url)
         guard data.count <= limit else { throw LibraryError.invalidIndex }
         return data
+    }
+}
+
+
+/// A historical observation, not a live permission query from the containing app.
+nonisolated enum KeyboardAccessReceipt {
+    static var url: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: LibraryReader.appGroup)?
+            .appendingPathComponent("keyboard-access-observed.json")
+    }
+    static let allowedNotification = "com.sihyeon.TelegramSticker.keyboardAccess.allowed"
+    static let deniedNotification = "com.sihyeon.TelegramSticker.keyboardAccess.denied"
+    private static let observationKey = "keyboardFullAccessObservedAt"
+    private static let deniedKey = "keyboardFullAccessDeniedAt"
+    static var lastDenied: Date? {
+        let defaults = UserDefaults(suiteName: LibraryReader.appGroup)
+        defaults?.synchronize()
+        return defaults?.object(forKey: deniedKey) as? Date
+    }
+    /// Called by the containing app after receiving the extension's observation.
+    /// A keyboard without Full Access cannot persist shared-container changes itself.
+    static func recordDeniedFromApp() {
+        if let url { try? FileManager.default.removeItem(at: url) }
+        let defaults = UserDefaults(suiteName: LibraryReader.appGroup)
+        defaults?.removeObject(forKey: observationKey)
+        defaults?.set(Date(), forKey: deniedKey)
+        defaults?.synchronize()
+    }
+    static func recordAllowed() {
+        let now = Date()
+        if let observed = lastAllowed, now.timeIntervalSince(observed) < 2 { return }
+        if let url, let data = try? JSONEncoder().encode(now) { try? data.write(to: url, options: .atomic) }
+        // Independent fallback if receipt-file publication temporarily fails.
+        if let defaults = UserDefaults(suiteName: LibraryReader.appGroup) {
+            defaults.removeObject(forKey: deniedKey)
+            defaults.set(now, forKey: observationKey)
+            defaults.synchronize()
+        }
+    }
+    static var lastAllowed: Date? {
+        let defaults = UserDefaults(suiteName: LibraryReader.appGroup)
+        defaults?.synchronize()
+        let fileDate: Date? = url.flatMap { try? Data(contentsOf: $0) }
+            .flatMap { try? JSONDecoder().decode(Date.self, from: $0) }
+        guard let observed = fileDate ?? (defaults?.object(forKey: observationKey) as? Date) else { return nil }
+        if let denied = defaults?.object(forKey: deniedKey) as? Date, denied >= observed { return nil }
+        return observed
     }
 }

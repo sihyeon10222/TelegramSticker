@@ -1,43 +1,192 @@
 import SwiftUI
+import UIKit
 
 struct OnboardingView: View {
     let finish: () -> Void
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var verified = KeyboardAccessReceipt.lastAllowed != nil
+    @State private var verificationText = ""
+    @FocusState private var verificationFocused: Bool
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    Image(systemName: "square.stack").font(.system(size: 44)).foregroundStyle(.tint)
+                    Image(systemName: "keyboard").font(.system(size: 44)).foregroundStyle(.tint)
                         .accessibilityHidden(true)
-                    Text("스티커가 필요할 때,\n키보드를 바꿔 보세요.").font(.largeTitle.bold())
+                    Text("키보드를 먼저 설정해 주세요").font(.largeTitle.bold())
                         .accessibilityAddTraits(.isHeader)
-                    Text("한국어·영어·숫자·이모지는 평소 Apple 키보드로 입력하세요. StickerBridge는 다운로드한 스티커를 고르는 키보드예요.")
-                    step("1. 팩 추가", symbol: "plus.circle", text: "내 스티커 팩의 +에서 공개 Telegram 링크를 추가하세요. 설치한 PNG·GIF는 인터넷 없이 쓸 수 있어요.")
-                    step("2. 키보드 추가", symbol: "keyboard", text: "설정 → 일반 → 키보드 → 키보드 → 새로운 키보드 추가 → StickerBridge를 선택하세요.")
-                    step("3. 지구본으로 선택", symbol: "globe", text: "채팅창에서 지구본을 길게 눌러 StickerBridge를 선택하세요. 기본 키보드로 돌아갈 때도 같은 방법을 써요. 전환 순서는 iOS가 정해요.")
-                    step("4. 복사 후 붙여넣기", symbol: "doc.on.doc", text: "스티커를 탭하고 채팅창에 직접 붙여넣어 전송하세요. 이미지 붙여넣기·투명도는 대상 앱에 따라 달라요.")
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("전체 접근은 이미지 복사에 필요해요").font(.headline)
-                        Text("설정의 StickerBridge 키보드에서 ‘전체 접근 허용’을 켜 주세요. 허용하지 않아도 스티커 보기와 키보드 전환은 가능해요.")
-                        Text("키보드는 네트워크를 사용하거나 입력 내용·기존 클립보드를 읽지 않아요. 최근 복사한 스티커 ID만 최대 24개 기기에 저장해요.")
-                            .foregroundStyle(.secondary)
+                    Text("StickerBridge 키보드에서 스티커를 복사할 수 있도록 전체 접근을 허용해 주세요.")
+                        .foregroundStyle(.secondary)
+                    KeyboardSetupAction(kind: .add)
+                    KeyboardSetupAction(kind: .fullAccess)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(verified ? "전체 접근 허용을 확인했어요" : "허용 상태 확인", systemImage: verified ? "checkmark.circle.fill" : "keyboard")
+                            .font(.headline).foregroundStyle(verified ? Color.green : Color.primary)
+                        if !verified {
+                            Text("설정을 마친 뒤 아래 입력칸을 누르고, 지구본을 길게 눌러 StickerBridge를 선택하세요. 키보드가 전체 접근을 확인하면 시작하기가 켜져요.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                            TextField("여기를 눌러 StickerBridge 키보드 선택", text: $verificationText)
+                                .textFieldStyle(.roundedBorder)
+                                .focused($verificationFocused)
+                                .submitLabel(.done)
+                                .onSubmit { verificationFocused = false }
+                                .autocorrectionDisabled().textInputAutocapitalization(.never)
+                                .accessibilityIdentifier("verifyKeyboardAccess")
+                            Button("허용 상태 다시 확인") { refreshVerification() }
+                                .font(.footnote)
+                        }
                     }
-                    Text("비밀번호 입력창 등에서는 이 키보드가 나타나지 않을 수 있어요. 메인 앱의 복사·공유도 이용할 수 있어요. 설정 탭에서 이 안내를 다시 확인할 수 있어요.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Button("시작하기", action: finish).buttonStyle(.glassProminent)
-                        .controlSize(.large).accessibilityIdentifier("finishOnboarding")
+                    Button("시작하기") {
+                        guard verified else { return }
+                        verificationFocused = false
+                        finish()
+                    }.buttonStyle(.glassProminent)
+                        .controlSize(.large).disabled(!verified)
+                        .accessibilityIdentifier("finishOnboarding")
                 }.padding(24).frame(maxWidth: 640, alignment: .leading).frame(maxWidth: .infinity)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: scenePhase) { _, phase in if phase == .active { refreshVerification() } }
             .navigationTitle("StickerBridge 시작")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) {
-                Button("나중에", action: finish).accessibilityIdentifier("skipOnboarding")
-            } }
+            .interactiveDismissDisabled()
+            .task {
+                while !Task.isCancelled {
+                    refreshVerification()
+                    do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+                }
+            }
         }
     }
-    private func step(_ title: String, symbol: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: symbol).font(.headline).accessibilityAddTraits(.isHeader)
-            Text(text)
+    private func refreshVerification() {
+        // A previously confirmed permission must not be discarded just because
+        // this SwiftUI sheet was recreated after returning from Settings.
+        verified = KeyboardAccessReceipt.lastAllowed != nil
+        if verified { verificationFocused = false }
+    }
+
+}
+
+struct KeyboardSettingsButton: View {
+    var destination: KeyboardSetupAction.Kind = .fullAccess
+    @State private var failedToOpen = false
+    var body: some View {
+        Button("아이폰 설정 열기", systemImage: "gear") {
+            Task { @MainActor in
+                switch destination {
+                case .add:
+                    // Open Settings without requesting any nested preference pane.
+                    guard let url = URL(string: "App-prefs:") else { failedToOpen = true; return }
+                    failedToOpen = !(await UIApplication.shared.open(url))
+                case .fullAccess:
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { failedToOpen = true; return }
+                    failedToOpen = !(await UIApplication.shared.open(url))
+                }
+            }
+        }.buttonStyle(.glass)
+            .alert("설정에서 직접 이동해 주세요", isPresented: $failedToOpen) {
+                Button("확인", role: .cancel) {}
+            } message: {
+                Text(destination == .add
+                    ? "설정 앱을 직접 열고 일반 → 키보드 → 키보드 → 새로운 키보드 추가에서 StickerBridge를 선택하세요."
+                    : "설정 → 앱 → StickerBridge → 키보드에서 전체 접근 허용을 켜 주세요.")
+            }
+    }
+}
+
+/// Observations from the running extension, never a live Settings query.
+@MainActor @Observable
+final class KeyboardAccessMonitor {
+    static let shared = KeyboardAccessMonitor()
+    enum Status { case unknown, allowed, denied }
+    var status: Status = .unknown
+    private init() {
+        refresh()
+        let callback: CFNotificationCallback = { _, _, name, _, _ in
+            guard let name else { return }
+            let denied = name.rawValue as String == KeyboardAccessReceipt.deniedNotification
+            Task { @MainActor in
+                if denied { KeyboardAccessReceipt.recordDeniedFromApp() }
+                else { KeyboardAccessReceipt.recordAllowed() }
+                KeyboardAccessMonitor.shared.refresh()
+            }
         }
+        for event in [KeyboardAccessReceipt.allowedNotification, KeyboardAccessReceipt.deniedNotification] {
+            CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil,
+                callback, event as CFString, nil, .deliverImmediately)
+        }
+    }
+    func refresh() {
+        if KeyboardAccessReceipt.lastAllowed != nil { status = .allowed }
+        else if KeyboardAccessReceipt.lastDenied != nil { status = .denied }
+        else { status = .unknown }
+    }
+}
+
+struct KeyboardSetupAction: View {
+    enum Kind { case add, fullAccess }
+    let kind: Kind
+    @Bindable private var access = KeyboardAccessMonitor.shared
+    @Environment(\.scenePhase) private var scenePhase
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                Label(kind == .add ? "키보드 추가" : "키보드 전체 접근을 허용해 주세요",
+                      systemImage: kind == .add ? "keyboard.badge.ellipsis" : "keyboard")
+                    .font(.headline)
+                Spacer(minLength: 8)
+                if kind == .fullAccess {
+                    Image(systemName: access.status == .allowed ? "checkmark.circle.fill" : access.status == .denied ? "xmark.circle.fill" : "questionmark.circle")
+                        .foregroundStyle(access.status == .allowed ? Color.green : access.status == .denied ? Color.red : Color.secondary)
+                        .accessibilityLabel(access.status == .allowed ? "마지막 확인: 허용" : access.status == .denied ? "마지막 확인: 미허용" : "허용 상태 미확인")
+                }
+            }
+            if kind == .fullAccess {
+                Text(access.status == .allowed ? "마지막 확인: 허용" : access.status == .denied ? "마지막 확인: 미허용" : "아직 확인되지 않았어요. StickerBridge 키보드를 한 번 열어 주세요.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if access.status != .unknown {
+                    Text("설정에서 변경한 상태는 키보드를 다시 열면 확인할 수 있어요.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Text(kind == .add
+                ? "설정 → 일반 → 키보드 → 키보드에서 새로운 키보드 추가 → StickerBridge를 선택하세요."
+                : "열리는 StickerBridge 설정에서 키보드 → 전체 접근 허용을 켜 주세요. 키보드는 입력 내용을 수집하지 않아요.")
+                .font(.footnote).foregroundStyle(.secondary)
+            KeyboardSettingsButton(destination: kind)
+        }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { access.refresh() } }
+        .task {
+            guard kind == .fullAccess else { return }
+            while !Task.isCancelled {
+                access.refresh()
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
+        }
+    }
+}
+
+struct KeyboardPermissionNotice: View {
+    var body: some View { KeyboardSetupAction(kind: .fullAccess) }
+}
+
+/// Reminder does not block unrelated app functions or misrepresent unknown state as denied.
+struct KeyboardPermissionReminder: ViewModifier {
+    let working: Bool
+    @State private var showing = false
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: working) { _, active in
+                if active, KeyboardAccessReceipt.lastAllowed == nil { showing = true }
+            }
+            .alert("키보드 전체 접근을 확인해 주세요", isPresented: $showing) {
+                Button("설정 열기") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
+                Button("계속 진행", role: .cancel) {}
+            } message: {
+                Text("작업은 계속 진행돼요. 키보드에서 스티커를 복사하려면 설정 → StickerBridge → 키보드 → 전체 접근 허용을 켜고 키보드를 한 번 열어 주세요.")
+            }
     }
 }

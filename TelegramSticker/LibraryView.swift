@@ -48,7 +48,7 @@ final class LibraryModel {
     }
 
     func delete(ids: [String]) async {
-        guard let writer, !isBusy else { return }
+        guard let writer, !isBusy, !ids.isEmpty else { return }
         isBusy = true
         defer { isBusy = false }
         do {
@@ -103,7 +103,9 @@ struct LibraryView: View {
     @State private var coverImages = SampleStickerImages()
     @State private var bottomActionsHeight: CGFloat = 72
     @State private var confirmBulkDelete = false
-    @State private var importLinkFile = false
+    @State private var sharing = false
+    @State private var sharingPack: PackManifestV1?
+    @State private var deletingPack: PackManifestV1?
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -130,25 +132,42 @@ struct LibraryView: View {
                 }
             }
             Spacer(minLength: 0)
-            if pack.telegramName != nil {
-                Button { importRequest = PackImportRequest(name: pack.telegramName, updating: true) } label: {
-                    Image(systemName: "arrow.clockwise")
-                }.buttonStyle(.glass).buttonBorderShape(.circle)
-                    .frame(width: 44, height: 44)
-                    .opacity(editMode == .active ? 0 : 1)
-                    .allowsHitTesting(editMode != .active)
-                    .accessibilityHidden(editMode == .active)
-                    .accessibilityLabel("\(pack.title) 업데이트")
-                    .accessibilityIdentifier("update.\(pack.id)")
-            }
+
         }
         .padding(.vertical, 4)
         .contextMenu {
-            PackLinkShareMenu(links: PackLinkList.links(for: [pack]))
-                .disabled(editMode == .active)
-            if pack.telegramName != nil {
-                Button("팩 업데이트", systemImage: "arrow.clockwise") { importRequest = PackImportRequest(name: pack.telegramName, updating: true) }
-                    .disabled(editMode == .active)
+            Button("업데이트 확인", systemImage: "arrow.clockwise") { updatePack(pack) }
+                .disabled(pack.telegramName == nil || ImportActivity.shared.count > 0)
+            Button("용량 최적화", systemImage: "slider.horizontal.3") { optimizationRequest = OptimizationRequest(packIDs: [pack.id]) }
+                .disabled(ImportActivity.shared.count > 0)
+            ShareLink(item: PackLinkList.links(for: [pack]).joined(separator: "\n")) {
+                Label("Sticker Pack 링크 공유", systemImage: "square.and.arrow.up")
+            }.disabled(PackLinkList.links(for: [pack]).isEmpty)
+            Button("삭제", systemImage: "trash", role: .destructive) { deletingPack = pack }
+                .disabled(ImportActivity.shared.count > 0)
+        }
+        .confirmationDialog("이 팩을 삭제할까요?", isPresented: Binding(
+            get: { deletingPack?.id == pack.id }, set: { if !$0 { deletingPack = nil } }
+        ), titleVisibility: .visible) {
+            Button("팩 삭제", role: .destructive) {
+                deletingPack = nil
+                Task { await model.delete(ids: [pack.id]) }
+            }
+        }
+    }
+
+    private func updatePack(_ pack: PackManifestV1) {
+        importRequest = PackImportRequest(name: pack.telegramName, updating: true, title: pack.title)
+    }
+
+    private func toggleSelection(sharing share: Bool) {
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.4, dampingFraction: 0.82)) {
+            if editMode == .active && sharing == share {
+                editMode = .inactive; sharing = false
+            } else {
+                sharing = share
+                bulkSelected = share ? Set(model.packs.map(\.id)) : []
+                editMode = .active
             }
         }
     }
@@ -156,19 +175,16 @@ struct LibraryView: View {
     private var packEditingActions: some View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 8) {
-                Button("전체 선택") { bulkSelected = Set(model.packs.map(\.id)) }
-                Button("업데이트") {
+                Button("업데이트 확인") {
                     let links = model.packs.filter { bulkSelected.contains($0.id) }
                         .compactMap { $0.telegramName.map { "https://t.me/addstickers/" + $0 } }
                     importRequest = PackImportRequest(name: nil, updating: true, links: links)
                 }
                 .disabled(!model.packs.contains { bulkSelected.contains($0.id) && $0.telegramName != nil } || ImportActivity.shared.count > 0)
                 .accessibilityIdentifier("updateSelectedPacks")
-                Button("최적화") { optimizationRequest = OptimizationRequest(packIDs: bulkSelected) }
+                Button("용량 최적화") { optimizationRequest = OptimizationRequest(packIDs: bulkSelected) }
                     .disabled(bulkSelected.isEmpty || ImportActivity.shared.count > 0)
                     .accessibilityIdentifier("optimizeSelectedPacks")
-                PackLinkShareMenu(links: PackLinkList.links(for: model.packs.filter { bulkSelected.contains($0.id) }), title: "공유")
-                    .accessibilityIdentifier("shareSelectedPackLinks")
                 Button("삭제", role: .destructive) { confirmBulkDelete = true }
                     .disabled(bulkSelected.isEmpty || ImportActivity.shared.count > 0)
                     .accessibilityIdentifier("deleteSelectedPacks")
@@ -182,6 +198,7 @@ struct LibraryView: View {
             }
             .font(.subheadline)
             .buttonStyle(.glass)
+            .controlSize(.large)
             .lineLimit(1)
         }
         .padding(12)
@@ -215,6 +232,14 @@ struct LibraryView: View {
                         NavigationLink(value: pack.id) { packRow(pack) }
                             .tag(pack.id)
                         .accessibilityIdentifier("pack.\(pack.id)")
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button("업데이트 확인", systemImage: "arrow.clockwise") { updatePack(pack) }
+                                .tint(.blue).disabled(pack.telegramName == nil || ImportActivity.shared.count > 0)
+                            Button("용량 최적화", systemImage: "slider.horizontal.3") { optimizationRequest = OptimizationRequest(packIDs: [pack.id]) }
+                                .tint(.indigo).disabled(ImportActivity.shared.count > 0)
+                            Button("공유", systemImage: "square.and.arrow.up") { sharingPack = pack }
+                                .tint(.teal).disabled(pack.telegramName == nil)
+                        }
                         .swipeActions(edge: .trailing) {
                             Button("삭제", systemImage: "trash", role: .destructive) {
                                 Task { await model.delete(ids: [pack.id]) }
@@ -229,7 +254,7 @@ struct LibraryView: View {
                 if editMode != .active, let id = ids.first { selected = id }
             }
             .onChange(of: editMode) { _, mode in
-                if mode == .inactive { bulkSelected.removeAll() }
+                if mode == .inactive { bulkSelected.removeAll(); sharing = false }
             }
             .disabled(model.isBusy)
             .environment(\.editMode, $editMode)
@@ -237,7 +262,16 @@ struct LibraryView: View {
             .contentMargins(.bottom, bottomActionsHeight, for: .scrollContent)
             .overlay(alignment: .bottom) {
                 VStack(spacing: 0) {
-                    packEditingActions
+                    Group {
+                        if sharing {
+                            let links = PackLinkList.links(for: model.packs.filter { bulkSelected.contains($0.id) })
+                            ShareLink(item: StickerLinkFile(text: links.joined(separator: "\n")), preview: SharePreview("스티커 팩 링크 목록")) {
+                                Label("선택한 팩 공유", systemImage: "square.and.arrow.up")
+                            }
+                            .disabled(links.isEmpty)
+                            .buttonStyle(.glassProminent).controlSize(.large).padding(12)
+                        } else { packEditingActions }
+                    }
                         .opacity(editMode == .active ? 1 : 0)
                         .offset(y: editMode == .active || reduceMotion ? 0 : 16)
                         .allowsHitTesting(editMode == .active)
@@ -249,25 +283,29 @@ struct LibraryView: View {
             .navigationTitle("내 스티커 팩")
             .toolbar {
                 ToolbarItem(id: "libraryEdit", placement: .topBarLeading) {
-                    Button {
-                        withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35)) {
-                            editMode = editMode == .active ? .inactive : .active
-                        }
-                    } label: {
-                        // A constant label width avoids relaying out the navigation bar.
+                    Button { toggleSelection(sharing: editMode == .active ? sharing : false) } label: {
                         Text(editMode == .active ? "완료" : "편집")
-                            .frame(minWidth: 32)
-                            .contentTransition(.interpolate)
+                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                     }
                     .accessibilityIdentifier("editPacks")
                 }
+                if editMode == .active {
+                    ToolbarSpacer(.fixed, placement: .topBarLeading)
+                    ToolbarItem(id: "librarySelectAll", placement: .topBarLeading) {
+                        Button {
+                            let all = Set(model.packs.map(\.id))
+                            bulkSelected = bulkSelected == all ? [] : all
+                        } label: {
+                            Text(bulkSelected == Set(model.packs.map(\.id)) && !model.packs.isEmpty ? "전체 해제" : "전체 선택")
+                                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                        }
+                        .disabled(model.packs.isEmpty).accessibilityIdentifier("selectAllPacks")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        PackLinkShareMenu(links: PackLinkList.links(for: model.packs), title: "전체 팩 링크 공유")
-                        Button("링크 파일 가져오기", systemImage: "doc.badge.plus") { importLinkFile = true }
-                    } label: { Image(systemName: "ellipsis") }
-                    .accessibilityLabel("팩 공유 및 링크 파일 가져오기")
-                    .accessibilityIdentifier("packLinkActions")
+                    Button { toggleSelection(sharing: true) } label: { Image(systemName: "square.and.arrow.up") }
+                        .accessibilityLabel("공유할 팩 선택").accessibilityIdentifier("selectPacksToShare")
+                        .disabled(model.packs.isEmpty || model.isBusy)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -288,11 +326,11 @@ struct LibraryView: View {
         } detail: {
             if let pack = model.packs.first(where: { $0.id == selected }) {
                 InstalledPackView(pack: pack, stickers: model.stickers(in: pack), update: {
-                    importRequest = PackImportRequest(name: pack.telegramName, updating: true)
+                    importRequest = PackImportRequest(name: pack.telegramName, updating: true, title: pack.title)
                 }, retry: {
                     importRequest = PackImportRequest(name: pack.telegramName, updating: false)
                 }, optimize: { ids in
-                    optimizationRequest = OptimizationRequest(packIDs: [pack.id], stickerIDs: ids)
+                    optimizationRequest = OptimizationRequest(packIDs: [pack.id], stickerIDs: ids.isEmpty ? nil : ids)
                 }) {
                     await model.delete(ids: [pack.id])
                 }
@@ -301,15 +339,10 @@ struct LibraryView: View {
                 ContentUnavailableView("스티커 팩을 선택하세요", systemImage: "square.grid.2x2")
             }
         }
-        .fileImporter(isPresented: $importLinkFile, allowedContentTypes: [.stickerBridgeLinks, .plainText]) { result in
-            switch result {
-            case .success(let url): Task { await PackLinkInbox.shared.open(url) }
-            case .failure(let error): model.message = error.localizedDescription
-            }
-        }
         .onChange(of: PackLinkInbox.shared.received?.id) { _, received in if received == nil { Task { await model.refresh() } } }
+        .sheet(item: $sharingPack) { pack in PackLinksShareView(links: PackLinkList.links(for: [pack])) }
         .sheet(item: $importRequest, onDismiss: { Task { await model.refresh() } }) { request in
-            if let writer = model.writer { ImportView(writer: writer, initialPackName: request.name, updating: request.updating, initialLinks: request.links) }
+            if let writer = model.writer { ImportView(writer: writer, initialPackName: request.name, updating: request.updating, initialLinks: request.links, initialPackTitle: request.title) }
         }
         .sheet(item: $optimizationRequest, onDismiss: { Task { await model.refresh() } }) { request in
             OptimizationView(request: request)
@@ -331,7 +364,7 @@ struct LibraryView: View {
     }
 }
 
-private struct PackImportRequest: Identifiable { let id = UUID(); let name: String?; let updating: Bool; var links: [String] = [] }
+private struct PackImportRequest: Identifiable { let id = UUID(); let name: String?; let updating: Bool; var links: [String] = []; var title: String? = nil }
 
 private struct SharedPNG: Identifiable { let id = UUID(); let data: Data; var type = "public.png" }
 
@@ -350,11 +383,13 @@ private struct InstalledPackView: View {
     @State private var copiedID: String?
     @State private var sharedPNG: SharedPNG?
     @State private var preview: SampleSticker?
+    @State private var permissionWarning = false
     @State private var confirmDelete = false
     @State private var selecting = false
     @State private var selectedStickers = Set<String>()
-    @State private var columnCount = 5
+    @State private var columnCount = 4
     @State private var pinchStartColumns: Int?
+    @State private var storageBytes: Int64?
 
     private var gridZoom: some Gesture {
         MagnifyGesture()
@@ -378,6 +413,11 @@ private struct InstalledPackView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(pack.stickers.count)개").font(.subheadline.weight(.semibold))
+                    if let storageBytes {
+                        Text(ByteCountFormatter.string(fromByteCount: storageBytes, countStyle: .file))
+                            .font(.caption).foregroundStyle(.secondary)
+                            .accessibilityLabel("팩 저장 용량 \(ByteCountFormatter.string(fromByteCount: storageBytes, countStyle: .file))")
+                    }
                     Spacer()
                     Text(status).font(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("installedCopyStatus")
@@ -399,7 +439,7 @@ private struct InstalledPackView: View {
                         Button {
                             if selecting {
                                 if !selectedStickers.insert(sticker.id).inserted { selectedStickers.remove(sticker.id) }
-                            } else { preview = sticker }
+                            } else { preview = preview?.id == sticker.id ? nil : sticker }
                         } label: {
                             Group {
                                 if sticker.animationURL != nil {
@@ -429,17 +469,11 @@ private struct InstalledPackView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(sticker.animationURL == nil ? sticker.name : "\(sticker.name), 애니메이션")
-                        .accessibilityHint("탭해 미리보기를 열고 복사 버튼을 선택하세요.")
+                        .accessibilityHint("다시 탭하면 미리보기를 닫아요. 길게 누르면 복사와 공유를 할 수 있어요.")
                         .accessibilityIdentifier("installedCopy.\(sticker.id)")
                         .contextMenu {
-                            if sticker.animationURL != nil {
-                                Button("움직임 보기", systemImage: "play.rectangle") { preview = sticker }
-                                    .accessibilityIdentifier("preview.\(sticker.id)")
-                                Button("정적 PNG로 복사", systemImage: "photo") { copy(sticker, asPNG: true) }
-                                Button("GIF 공유", systemImage: "square.and.arrow.up") { share(sticker, animated: true) }
-                            }
-                            Button("PNG 공유", systemImage: "square.and.arrow.up") { share(sticker, animated: false) }
-                                .accessibilityIdentifier("share.\(sticker.id)")
+                            Button("복사", systemImage: "doc.on.doc") { copy(sticker) }
+                            Button("공유", systemImage: "square.and.arrow.up") { share(sticker, animated: sticker.animationURL != nil) }
                         }
                     }
                 }
@@ -450,31 +484,68 @@ private struct InstalledPackView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if pack.telegramName != nil {
-                PackLinkShareMenu(links: PackLinkList.links(for: [pack]))
-                    .accessibilityIdentifier("sharePackLink")
+            ToolbarItem(id: "stickerSelection", placement: .topBarLeading) {
+                Button {
+                    withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35)) {
+                        selecting.toggle(); selectedStickers.removeAll(); preview = nil
+                    }
+                } label: {
+                    Text(selecting ? "완료" : "선택").lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                }
             }
-            Button(selecting ? "완료" : "선택") { selecting.toggle(); selectedStickers.removeAll(); preview = nil }
-            if pack.telegramName != nil { Button("업데이트", systemImage: "arrow.clockwise", action: update).accessibilityIdentifier("updatePack") }
-            Button("팩 삭제", systemImage: "trash", role: .destructive) { confirmDelete = true }
-                .accessibilityIdentifier("deletePack")
+            if selecting {
+                ToolbarSpacer(.fixed, placement: .topBarLeading)
+                ToolbarItem(id: "stickerSelectAll", placement: .topBarLeading) {
+                    Button {
+                        let all = Set(stickers.map(\.id))
+                        selectedStickers = selectedStickers == all ? [] : all
+                    } label: {
+                        Text(!stickers.isEmpty && selectedStickers == Set(stickers.map(\.id)) ? "전체 해제" : "전체 선택")
+                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    }.disabled(stickers.isEmpty)
+                }
+            }
+            if !selecting {
+                ToolbarItem(placement: .topBarTrailing) {
+                    ShareLink(item: PackLinkList.links(for: [pack]).joined(separator: "\n")) {
+                        Label("Sticker Pack 링크 공유", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(PackLinkList.links(for: [pack]).isEmpty)
+                    .labelStyle(.iconOnly).accessibilityIdentifier("sharePackLink")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    if pack.telegramName != nil {
+                        Button("업데이트 확인", systemImage: "arrow.clockwise", action: update)
+                            .disabled(selecting || ImportActivity.shared.count > 0)
+                            .accessibilityIdentifier("updatePack")
+                    }
+                    Button(selecting ? "선택한 \(selectedStickers.count)개 용량 최적화" : "용량 최적화", systemImage: "slider.horizontal.3") {
+                        optimize(selecting ? selectedStickers : [])
+                    }
+                    .disabled(ImportActivity.shared.count > 0 || (selecting && selectedStickers.isEmpty))
+                    .accessibilityIdentifier("optimizePack")
+                } label: { Label("옵션", systemImage: "ellipsis") }
+                    .labelStyle(.iconOnly).accessibilityIdentifier("packOptions")
+            }
+            if !selecting {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("팩 삭제", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                        .accessibilityIdentifier("deletePack")
+                }
+            }
         }
+        .alert("키보드 전체 접근을 확인해 주세요", isPresented: $permissionWarning) {
+            Button("설정 열기") {
+                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+            }
+            Button("확인", role: .cancel) {}
+        } message: { Text("앱에서 복사는 가능하지만, 키보드에서 복사하려면 전체 접근이 필요해요. 설정 → StickerBridge → 키보드에서 허용하고 키보드를 한 번 열어 주세요.") }
         .confirmationDialog("이 팩을 삭제할까요?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("팩 삭제", role: .destructive) { Task { await delete(); dismiss() } }
         }
         .sheet(item: $sharedPNG) { PNGShareSheet(data: $0.data, type: $0.type).presentationDetents([.medium, .large]) }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if selecting {
-                GlassEffectContainer(spacing: 12) {
-                    HStack {
-                        Button("전체 선택") { selectedStickers = Set(stickers.map(\.id)) }
-                        Spacer()
-                        Button("선택한 \(selectedStickers.count)개 최적화") { optimize(selectedStickers) }
-                            .disabled(selectedStickers.isEmpty || ImportActivity.shared.count > 0)
-                    }.buttonStyle(.glass).lineLimit(1)
-                }.padding(12)
-            }
-        }
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 Text(pack.title)
@@ -483,6 +554,7 @@ private struct InstalledPackView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16).padding(.vertical, 10)
                     .accessibilityAddTraits(.isHeader)
+                    .background(Color(uiColor: .systemBackground))
                 if let preview {
                     VStack(spacing: 8) {
                         StickerLargePreview(sticker: preview)
@@ -494,33 +566,47 @@ private struct InstalledPackView: View {
                         if let record = pack.stickers.first(where: { preview.id == pack.id + "." + $0.id }), let quality = record.conversionQuality {
                             Text(quality.hasPrefix("용량 최적화") ? quality : "자동 품질 조절 · \(quality)").font(.caption).foregroundStyle(.secondary)
                         }
-                        GlassEffectContainer(spacing: 12) {
-                            HStack(spacing: 8) {
-                                Button("최적화") { optimize([preview.id]) }.buttonStyle(.glass)
-                                    .disabled(ImportActivity.shared.count > 0)
-                                Button("복사") { copy(preview) }.buttonStyle(.glassProminent).accessibilityIdentifier("previewCopy")
-                                Button("공유", systemImage: "square.and.arrow.up") { share(preview, animated: preview.animationURL != nil) }.buttonStyle(.glass)
-                                Button("닫기") { self.preview = nil }.buttonStyle(.glass).accessibilityIdentifier("previewClose")
-                            }
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .font(.subheadline)
-                        }
+                    }
+                    .onTapGesture { self.preview = nil }
+                    .contextMenu {
+                        Button("복사", systemImage: "doc.on.doc") { copy(preview) }
+                        Button("공유", systemImage: "square.and.arrow.up") { share(preview, animated: preview.animationURL != nil) }
                     }
                     .controlSize(.regular)
                     .buttonBorderShape(.capsule)
                     .padding(16)
                     .frame(maxWidth: .infinity)
-                    .background(Color(uiColor: .secondarySystemBackground))
+                    .background(Color(uiColor: .systemBackground))
                     .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                 }
             }
-            .background(Color(uiColor: .systemBackground))
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.18) : .spring(response: 0.38, dampingFraction: 0.86), value: preview?.id)
+        .task(id: pack.revision) {
+            let pack = pack
+            let bytes = await Task.detached(priority: .utility) { () -> Int64? in
+                guard let reader = try? LibraryReader.shared() else { return nil }
+                var paths = Set(pack.stickers.flatMap { record in
+                    [record.pngPath, record.thumbnailPath] + [record.animationPath, record.playbackPath].compactMap { $0 }
+                })
+                paths.insert("packs/\(pack.id)/\(pack.revision)/manifest.json")
+                var checkedDirectories = Set<String>()
+                var total: Int64 = 0
+                for path in paths {
+                    guard let url = try? reader.file(path, checkedDirectories: &checkedDirectories),
+                          let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                          values.isRegularFile == true, let size = values.fileSize else { continue }
+                    total += Int64(size)
+                }
+                return total
+            }.value
+            guard !Task.isCancelled else { return }
+            storageBytes = bytes
+        }
     }
 
     private func copy(_ sticker: SampleSticker, asPNG: Bool = false) {
+        permissionWarning = KeyboardAccessReceipt.lastAllowed == nil
         let result = StickerCopyService().copy(sticker, isAllowed: true, asPNG: asPNG)
         if result == .copied { copiedID = sticker.id }
         status = result.message

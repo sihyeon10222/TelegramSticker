@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import ImageIO
 import UniformTypeIdentifiers
 import CStickerVP9
@@ -49,7 +50,7 @@ nonisolated struct StickerWebM {
             var cursor = range.lowerBound, result: [Element] = []
             while cursor < range.upperBound {
                 elements += 1
-                guard elements <= 10_000 else { throw StickerImportError.tooLarge }
+                guard elements <= 10_000 else { throw ImportLimitFailure(check: "webm_elements", actual: String(elements), limit: "10000 elements") }
                 let (id, _) = try vint(&cursor, end: range.upperBound, id: true)
                 let (size, unknown) = try vint(&cursor, end: range.upperBound)
                 guard (!unknown || id == 0x18538067), unknown || size <= UInt64(range.upperBound - cursor) else {
@@ -74,7 +75,7 @@ nonisolated struct StickerWebM {
         }
     }
     static func parse(_ data: Data) throws -> Self {
-        guard !data.isEmpty, data.count <= 20 * 1024 * 1024 else { throw StickerImportError.tooLarge }
+        guard !data.isEmpty, data.count <= 20 * 1024 * 1024 else { throw ImportLimitFailure(check: "webm_input_bytes", actual: String(data.count), limit: "1...20971520 bytes") }
         var stage = "header"
         do {
         var p = Parser(bytes: Array(data))
@@ -98,7 +99,7 @@ nonisolated struct StickerWebM {
               let video = track.first(where: { $0.id == 0xe0 }) else { throw StickerImportError.unsupportedFormat }
         let props = try p.children(video.range)
         let w = try p.uint(props.first { $0.id == 0xb0 }), h = try p.uint(props.first { $0.id == 0xba })
-        guard (1...512).contains(w), (1...512).contains(h) else { throw StickerImportError.tooLarge }
+        guard (1...512).contains(w), (1...512).contains(h) else { throw ImportLimitFailure(check: "webm_dimensions", actual: "\(w)x\(h)", limit: "1...512 per dimension") }
         let hasAlpha = try props.first(where: { $0.id == 0x53c0 }).map { try p.uint($0) == 1 } ?? false
         stage = "timing"
         let metadata = try p.children(info.range)
@@ -156,10 +157,20 @@ nonisolated struct StickerWebM {
     }
 }
 
+/// CPU time excludes OS scheduling/suspension. Used only across synchronous work
+/// on the same thread; asynchronous renderers charge one frame at a time.
+nonisolated enum ProcessingCPUClock {
+    static var seconds: Double {
+        var value = timespec()
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &value)
+        return Double(value.tv_sec) + Double(value.tv_nsec) / 1_000_000_000
+    }
+}
+
 actor WebMConverter {
     func convert(_ data: Data, output: URL? = nil, quality: AnimationQuality = .original) throws -> ConvertedAnimation {
         let video = try StickerWebM.parse(data)
-        let deadline = ContinuousClock.now.advanced(by: .seconds(45))
+        let deadline = ProcessingCPUClock.seconds + 45
         // Image I/O requires a known nonzero image count. Count visible VP9 frames
         // without allocating RGBA images, then encode using a fresh decoder.
         let sourceCount = try preflight(video, deadline: deadline)
@@ -187,7 +198,7 @@ actor WebMConverter {
         }
         for packet in video.packets {
             try Task.checkCancellation()
-            guard ContinuousClock.now < deadline else { throw WebMConversionFailure.deadline }
+            guard ProcessingCPUClock.seconds < deadline else { throw WebMConversionFailure.deadline }
             try autoreleasepool {
                 var rgba = [UInt8](repeating: 0, count: 512 * 512 * 4), width: Int32 = 0, height: Int32 = 0
                 let decoded = packet.color.withUnsafeBytes { color in
@@ -243,17 +254,17 @@ actor WebMConverter {
 
     func diagnostics(_ data: Data) throws -> String {
         let video = try StickerWebM.parse(data)
-        let count = try preflight(video, deadline: .now.advanced(by: .seconds(45)))
+        let count = try preflight(video, deadline: ProcessingCPUClock.seconds + 45)
         return "packets=\(video.packets.count), visibleFrames=\(count), duration=\(video.duration), size=\(video.width)x\(video.height)"
     }
 
-    private func preflight(_ video: StickerWebM, deadline: ContinuousClock.Instant) throws -> Int {
+    private func preflight(_ video: StickerWebM, deadline: Double) throws -> Int {
         guard let decoder = sb_vp9_create() else { throw WebMConversionFailure.bitstream }
         defer { sb_vp9_destroy(decoder) }
         var count = 0
         for packet in video.packets {
             try Task.checkCancellation()
-            guard ContinuousClock.now < deadline else { throw WebMConversionFailure.deadline }
+            guard ProcessingCPUClock.seconds < deadline else { throw WebMConversionFailure.deadline }
             var width: Int32 = 0, height: Int32 = 0
             let decoded = packet.color.withUnsafeBytes { color in
                 (packet.alpha ?? Data()).withUnsafeBytes { alpha in

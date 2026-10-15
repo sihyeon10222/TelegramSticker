@@ -244,6 +244,11 @@ final class KeyboardViewController: UIInputViewController,
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        if let epoch = UserDefaults(suiteName: LibraryReader.appGroup)?.string(forKey: "appResetEpoch"),
+           UserDefaults.standard.string(forKey: "appliedResetEpoch") != epoch {
+            recent.clear(); packOrder.reset(); selectionStore.save(.all); selection = .all
+            UserDefaults.standard.set(epoch, forKey: "appliedResetEpoch")
+        }
         presentationActive = true
         loadGeneration += 1
         loadTask?.cancel()
@@ -368,7 +373,11 @@ final class KeyboardViewController: UIInputViewController,
 
     private func refreshPermission(resetStatus: Bool = false) {
         let allowed = hasFullAccess
+        if allowed { KeyboardAccessReceipt.recordAllowed() }
         guard resetStatus || previousFullAccess != allowed else { return }
+        let event = allowed ? KeyboardAccessReceipt.allowedNotification : KeyboardAccessReceipt.deniedNotification
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(rawValue: event as CFString), nil, nil, true)
         previousFullAccess = allowed
         resetStatusTask?.cancel()
         lastCopiedID = nil

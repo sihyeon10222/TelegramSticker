@@ -10,6 +10,7 @@ import Security
         try WorkerConfiguration(address: "https://stickerbridge.stickerbridge-worker.workers.dev", accessKey: "")
     }
 
+    static func reset() { SecItemDelete(query as CFDictionary) }
     static func save(_ config: WorkerConfiguration) throws {
         let data = try JSONEncoder().encode(config)
         let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)

@@ -15,8 +15,8 @@ nonisolated enum StickerImportError: Error, LocalizedError {
         case .unsupportedFormat: "지원 범위 밖이거나 손상된 스티커예요. PNG·WebP, 벡터 TGS, 10초 이하 VP9 WebM을 지원해요."
         case .tooLarge: "외부 서비스의 파일 한도 또는 안전한 디코딩 범위를 초과했어요."
         case .conversionTimeout: "애니메이션 처리 시간이 초과됐어요. 낮은 해상도로 다시 시도할 수 있어요."
-        case .updateFailed: "업데이트 일부 항목을 준비하지 못했어요. 기존 팩을 유지했어요. 실패 항목을 확인해 주세요."
-        case .refreshUnsupported: "서버가 새로 조회를 지원하지 않아요. 서버 업데이트가 필요해요."
+        case .updateFailed: "업데이트 확인 중 일부 항목을 준비하지 못했어요. 기존 팩을 유지했어요. 실패 항목을 확인해 주세요."
+        case .refreshUnsupported: "서버가 새로 조회를 지원하지 않아요. 최신 버전의 서버가 필요해요."
         case .noStaticStickers: "설치 가능한 일반 스티커가 없는 팩이에요."
         case .partial(let completed, let total): "\(total)개 중 \(completed)개를 준비했어요. 설치 가능한 항목이 없어 팩을 추가하지 못했어요. 다시 시도해 주세요."
         case .network: "네트워크에 연결할 수 없어요. 연결 상태를 확인한 뒤 다시 시도해 주세요."
@@ -100,8 +100,15 @@ nonisolated struct ImportProgress: Sendable {
     let completed: Int
     let total: Int
     let failed: Int
+    let applied: Bool
+    init(completed: Int, total: Int, failed: Int, applied: Bool = false) {
+        self.completed = completed; self.total = total; self.failed = failed; self.applied = applied
+    }
     var installedCount: Int { min(max(0, total), max(0, completed)) }
-    var fraction: Double { total > 0 ? Double(installedCount) / Double(total) : 0 }
+    var fraction: Double {
+        let fraction = total > 0 ? Double(installedCount) / Double(total) : 0
+        return applied ? fraction : min(0.99, fraction)
+    }
     var percentage: Int { Int(fraction * 100) }
     var displayText: String { "\(installedCount)/\(max(0, total)) (\(percentage)%) 실패 \(max(0, failed))" }
 }

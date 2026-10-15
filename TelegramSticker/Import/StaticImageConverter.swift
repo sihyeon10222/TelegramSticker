@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 actor StaticImageConverter {
     func png(from data: Data) throws -> Data {
-        guard data.count <= 20 * 1024 * 1024 else { throw StickerImportError.tooLarge }
+        guard data.count <= 20 * 1024 * 1024 else { throw ImportLimitFailure(check: "static_input_bytes", actual: String(data.count), limit: "20971520 bytes") }
         if data.count > 20, String(data: data[0..<4], encoding: .ascii) == "RIFF",
            String(data: data[8..<12], encoding: .ascii) == "WEBP",
            String(data: data[12..<16], encoding: .ascii) == "VP8X", data[20] & 2 != 0 {
