@@ -265,3 +265,10 @@ Worker 타입 검사·배포 없는 번들 검사 완료. 테스트 실행·Work
 2026-10-16 가로 팩별 제목 정렬 보정: 앞선 PackTitleBounds 약한 참조와 principal 내부 UILabel 배치를 대체한다. 가로 제목은 표시 중인 상세 UINavigationBar 안의 실제 marker를 찾아 버튼 사이 폭 전체를 쓰는 UILabel을 해당 bar에 배치한다. marker 참조 누락 시 시스템 제목 영역으로 정렬하던 fallback을 제거하고 가로 navigationTitle은 비워 중복 제목을 방지한다. 뷰 해제·세로 전환 시 label과 displayLink를 제거한다. 세로 및 다른 동작은 유지하며 기존 파일 내부 수정이다.
 
 2026-10-16 가로 제목 미표시 수정: LandscapePackTitle이 UIKit UINavigationBar를 반드시 찾도록 한 조건을 제거했다. 실제 선택·공유 marker 및 principal의 공통 상위 뷰를 제목 배치 컨테이너로 사용한다. 버튼들이 아직 부착되지 않은 동안은 principal 호스트 내부에 제목을 표시해 제목을 제거하는 경로를 없앤다. 세로·버튼·회전·저장 동작과 타깃 경계는 유지한다.
+
+2026-10-16 iPad 사이드바 목록 정렬: LibraryView의 넓은 레이아웃은 plain 목록과 명시적 행·헤더 여백을 사용한다. 편집 시 기본 List 선택 여백 대신 행 내부 선택 버튼으로 bulkSelected를 갱신하고 선택 원과 미리보기 사이 16pt 간격을 둔다. 일반 탐색·드래그 순서 변경·공유 및 삭제는 기존 경로를 유지한다. LibraryListStyle은 같은 파일 내부의 표시 전용 modifier다. 파일 이동·타깃·리소스·저장 경로 변경은 없다.
+
+
+2026-10-16 선택·공유·알림 개선: `StickerDragSelection.swift`를 Features/Library에서 앱 공통 `UI/`로 옮겨 상세와 갤러리가 함께 사용한다. 갤러리는 미설치 팩의 드래그 범위 선택·전체 선택/선택 해제를 제공한다. `App/TabReselectionObserver.swift`는 시스템 탭 delegate를 전달하면서 내 스티커 팩 재선택을 홈 이동 이벤트로 연결한다. 하단 작업 버튼 규격과 행 상하 여백을 통일하고 넓은 사이드바도 공유·추가 툴바 그룹을 사용한다. `UI/PackLinkSharing.swift`는 실제 상세 공유 버튼에 iPad popover를 고정하고 목록 스와이프는 링크 텍스트 공유를 바로 연다. 최적화 완료 알림에는 세션·품질 목적지를 넣고 앱에서 준비 결과 및 revision 유효성을 확인한 뒤 비교·적용 화면을 연다. 기존 모달이 닫힐 때까지 대기하며 만료 결과는 재준비를 안내한다. 파일은 앱 동기화 그룹에만 포함되고 키보드·백엔드·저장 경로 변경은 없다. 테스트는 요청 없이는 실행하지 않는다.
+
+2026-10-17 알림 종료 수정: WorkNotifications는 async delegate bridge 대신 명시적인 completion handler delegate를 사용하고, 알림 응답 및 foreground 표시의 완료 콜백을 MainActor에서 호출한다. iPad 종료 로그의 UIKit snapshot/state restoration 메인 스레드 assertion을 해결하기 위한 변경이다. 상세 공유 버튼은 기존 기본 전경색을 사용한다. 넓은 사이드바의 설치된 팩 제목은 고정 Section header 대신 일반 목록 행으로 배치해 스크롤과 함께 사라진다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로는 유지한다.

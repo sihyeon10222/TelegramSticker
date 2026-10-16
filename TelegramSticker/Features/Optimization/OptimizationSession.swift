@@ -27,6 +27,16 @@ final class OptimizationSession: Identifiable {
                 .compactMap { $0.telegramName.map { "https://t.me/addstickers/" + $0 } }
         }
     }
+    func openPreparedProfile(_ rawValue: String) async -> Bool {
+        guard !running, !finished, let profile = StorageOptimizationProfile(rawValue: rawValue),
+              let draft = drafts[profile], let writer = LibraryWriter.shared,
+              FileManager.default.fileExists(atPath: draft.root.path) else { return false }
+        for original in draft.originals {
+            guard (try? await writer.hasRevision(id: original.id, revision: original.revision)) == true else { return false }
+        }
+        self.profile = profile
+        return true
+    }
     func removeDrafts(deleteFiles: Bool = true) {
         guard !running else { return }
         let roots = drafts.values.map(\.root)
@@ -74,7 +84,8 @@ final class OptimizationSession: Identifiable {
                 var success = false
                 defer {
                     running = false; ImportActivity.shared.count -= 1
-                    BackgroundWork.shared.end(id: id, success: success, detail: message, cancelled: Task.isCancelled)
+                    BackgroundWork.shared.end(id: id, success: success, detail: message, cancelled: Task.isCancelled,
+                        notificationInfo: apply ? [:] : ["optimizationSession": self.id.uuidString, "optimizationProfile": selectedProfile.rawValue])
                 }
                 do {
                     guard let writer = LibraryWriter.shared else { throw LibraryError.unavailable }

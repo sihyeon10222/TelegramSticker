@@ -36,6 +36,10 @@ struct GalleryView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var galleryVisible = false
     @State private var selected = Set<String>()
+    @State private var selectionFrames: [String: CGRect] = [:]
+    @State private var suppressTapUntil = Date.distantPast
+    @State private var selectionGeneration = 0
+    private var selectableIDs: [String] { catalog.packs.filter { !installed.contains($0.id.lowercased()) }.map(\.id) }
     @State private var installed = Set<String>()
     @State private var client: WorkerClient? = {
         (try? ImportSettings.load()).map { WorkerClient(configuration: $0) }
@@ -58,23 +62,41 @@ struct GalleryView: View {
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(catalog.packs) { entry in
                             GalleryPackCard(entry: entry, client: client, selected: selected.contains(entry.id),
-                                            installed: installed.contains(entry.id), galleryVisible: galleryVisible && installation == nil && ImportActivity.shared.presentedImport == nil && OptimizationCenter.shared.presented == nil) {
+                                            installed: installed.contains(entry.id.lowercased()), galleryVisible: galleryVisible && installation == nil && ImportActivity.shared.presentedImport == nil && OptimizationCenter.shared.presented == nil) {
+                                guard Date() >= suppressTapUntil else { return }
                                 if !selected.insert(entry.id).inserted { selected.remove(entry.id) }
+                            }
+                            .background {
+                                GeometryReader { cell in
+                                    Color.clear.preference(key: StickerSelectionFrames.self,
+                                        value: installed.contains(entry.id.lowercased()) ? [:] : [entry.id: cell.frame(in: .named("gallerySelectionGrid"))])
+                                }
                             }
                         }
                     }
+                    .coordinateSpace(name: "gallerySelectionGrid")
+                    .onPreferenceChange(StickerSelectionFrames.self) { selectionFrames = $0 }
+                    .background {
+                        StickerDragSelection(active: galleryVisible && installation == nil && ImportActivity.shared.presentedImport == nil && OptimizationCenter.shared.presented == nil,
+                            generation: selectionGeneration, frames: selectionFrames, orderedIDs: selectableIDs, selection: $selected,
+                            began: { suppressTapUntil = .distantFuture },
+                            ended: { suppressTapUntil = Date().addingTimeInterval(0.35) })
+                    }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { _ in selectionGeneration += 1 }
                 }.padding(16).frame(maxWidth: 1040, alignment: .leading).frame(maxWidth: .infinity)
             }
             .refreshable { if let client { await catalog.refresh(client: client, force: true) } }
             .navigationTitle("갤러리")
             .toolbar {
-                Button("선택 해제") { selected.removeAll() }.disabled(selected.isEmpty)
+                Button(selected.isEmpty ? "전체 선택" : "선택 해제") {
+                    if selected.isEmpty { selected = Set(selectableIDs) } else { selected.removeAll() }
+                }.disabled(selected.isEmpty && selectableIDs.isEmpty)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 8) {
                     Button {
                             guard ImportActivity.shared.count == 0, LibraryWriter.shared != nil else { return }
-                            let links = catalog.packs.filter { selected.contains($0.id) && !installed.contains($0.id) }.map(\.link)
+                            let links = catalog.packs.filter { selected.contains($0.id) && !installed.contains($0.id.lowercased()) }.map(\.link)
                             guard !links.isEmpty else { return }
                             installation = GalleryInstallation(links: links)
                             selected.removeAll()
@@ -127,7 +149,7 @@ struct GalleryView: View {
                 .compactMap { $0.telegramName?.lowercased() })
         }.value
         installed = names
-        selected.subtract(names)
+        selected = Set(selected.filter { !names.contains($0.lowercased()) })
     }
 }
 

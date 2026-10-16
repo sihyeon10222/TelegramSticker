@@ -177,12 +177,7 @@ struct InstalledPackView: View {
                 SelectionControls(id: "stickerSelection", active: selecting, title: "선택", toggle: toggleSelection)
             }
             ToolbarItem(id: "stickerShare", placement: .topBarTrailing) {
-                ShareLink(item: PackLinkList.links(for: [pack]).joined(separator: "\n")) {
-                    Label("Sticker Pack 링크 공유", systemImage: "square.and.arrow.up")
-                }
-                .disabled(selecting || PackLinkList.links(for: [pack]).isEmpty)
-                .labelStyle(.iconOnly)
-                .accessibilityIdentifier("sharePackLink")
+                PackLinkShareButton(text: PackLinkList.links(for: [pack]).joined(separator: "\n"), disabled: selecting)
                 .background {
                     if landscape { PackTitleBoundary(leading: false) }
                 }

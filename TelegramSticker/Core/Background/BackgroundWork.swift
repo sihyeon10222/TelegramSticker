@@ -118,7 +118,7 @@ final class BackgroundWork {
         task.progress.completedUnitCount = job.finalized ? job.completed * 100 : min(job.completed * 100, job.total * 99)
         if force || changed { task.updateTitle(job.title, subtitle: subtitle) }
     }
-    func end(id: String?, success: Bool, detail: String? = nil, cancelled: Bool = false) {
+    func end(id: String?, success: Bool, detail: String? = nil, cancelled: Bool = false, notificationInfo: [String: String] = [:]) {
         DownloadDiagnostics.shared.finish(success: success, summary: detail, cancelled: cancelled)
         guard let id, let job = jobs.removeValue(forKey: id) else { return }
         if job.bridge != .invalid { UIApplication.shared.endBackgroundTask(job.bridge) }
@@ -128,7 +128,7 @@ final class BackgroundWork {
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: id)
         if job.kind.sendsCompletion, !cancelled {
             WorkNotifications.shared.send(title: job.title + (success ? " 완료" : " 종료 · 확인 필요"),
-                                          body: detail ?? job.subtitle, identifier: id)
+                                          body: detail ?? job.subtitle, identifier: id, userInfo: success ? notificationInfo : [:])
         }
     }
 }

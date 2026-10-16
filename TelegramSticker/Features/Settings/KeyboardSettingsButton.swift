@@ -21,7 +21,7 @@ struct KeyboardSettingsButton: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "gear")
-                Text("아이폰 설정 열기")
+                Text("설정 열기")
             }
             .fixedSize(horizontal: true, vertical: false)
         }
