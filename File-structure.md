@@ -317,4 +317,4 @@ Worker 타입 검사·배포 없는 번들 검사 완료. 테스트 실행·Work
 
 2026-10-17 사이드바 전환 흰 점 후속: SelectionToggleButton은 glassEffectTransition(.identity)로 툴바 재부착 중 글래스의 등장·퇴장 축소 전환을 생략한다. 바깥 transaction에서 내비게이션 애니메이션을 제거한 뒤 내부 active 값 전용 애니메이션만 적용해 사이드바 열 이동이 버튼의 글래스·라벨 전환에 전달되지 않도록 한다. 선택/완료의 폭·파란 tint·blurReplace와 시스템 사이드바 토글은 유지한다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다.
 
-2026-10-17 선택 버튼 렌더링 교체: 앞선 SwiftUI glassEffectTransition/transaction 조정을 제거했다. SelectionControls.swift 안의 SelectionToggleButton은 UIViewRepresentable로 하나의 UIButton을 유지하고 UIButton.Configuration.glass()/prominentGlass()로 배경과 라벨을 같은 네이티브 컨트롤에서 그린다. 사이드바 표시 변경만으로 configuration을 갱신하지 않으며 선택값이 바뀔 때만 네이티브 모양·색을 전환한다. SwiftUI glassEffect와 blurReplace 라벨은 제거하고 64×44pt 선택/편집 및 44×44pt 파란 완료 체크, 접근성 ID, Reduce Motion과 기존 동작을 유지한다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다.
+2026-10-17 선택 버튼 교체 철회: 사용자 요청으로 UIKit UIButton 렌더링 교체를 되돌리고 교체 직전의 SwiftUI SelectionToggleButton을 복원했다. 기존 capsule glassEffect, 선택/완료 크기·색상·blurReplace 및 glassEffectTransition(.identity)/transaction 설정을 복원하며 다른 기능은 변경하지 않는다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다.
