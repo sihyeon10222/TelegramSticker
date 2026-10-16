@@ -32,9 +32,12 @@ struct DownloadLogsView: View {
         }
         .navigationTitle("다운로드 로그")
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button(selecting ? "완료" : "선택") { selecting.toggle(); selection.removeAll(); copied = false }
+            ToolbarItem(placement: .topBarTrailing) {
+                SelectionToggleButton(active: selecting, title: "선택") { selecting.toggle(); selection.removeAll(); copied = false }
                     .disabled(operations.isEmpty)
+            }
+            .sharedBackgroundVisibility(.hidden)
+            ToolbarItem(placement: .topBarTrailing) {
                 Button("비우기", role: .destructive) { store.clear(); selection.removeAll(); selecting = false }
                     .disabled(operations.isEmpty)
             }
@@ -42,9 +45,6 @@ struct DownloadLogsView: View {
         .safeAreaInset(edge: .bottom) {
             if selecting {
                 HStack {
-                    Button(selection.count == operations.count ? "선택 해제" : "전체 선택") {
-                        selection = selection.count == operations.count ? [] : Set(operations.map(\.id))
-                    }
                     Spacer()
                     Button(copied ? "복사됨" : "작업 복사 (\(selection.count))") {
                         copyDiagnosticText(store.export(selection)); copied = true

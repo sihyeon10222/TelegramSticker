@@ -3,6 +3,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import CryptoKit
 import Observation
+import UIKit
 
 nonisolated struct GalleryPreviewFiles: Sendable {
     let poster: URL?
@@ -14,6 +15,114 @@ final class GalleryPreviewState {
     static let shared = GalleryPreviewState()
     var generation = 0
     var maintaining = false
+    // SwiftUI may discard a LazyVGrid card; its loaded state must outlive that view.
+    private var items: [String: GalleryPreviewItem] = [:]
+    private var order: [String] = []
+    var metadata: [String: RemotePack] = [:]
+    private init() {
+        // Populate the initial viewport before SwiftUI constructs any gallery cards.
+        // Bound synchronous work; the remainder is restored off the main thread.
+        apply(GalleryDiskCache.read(names: Array(GalleryCatalogStore.shared.packs.prefix(12).map(\.id))))
+    }
+    private func apply(_ cards: [GalleryCachedCard]) {
+        for card in cards {
+            if metadata[card.pack.name] == nil { metadata[card.pack.name] = card.pack }
+            for preview in card.previews {
+                item(key: GalleryPreviewStore.key(pack: card.pack.name, sticker: preview.sticker))
+                    .restore(files: preview.files, poster: preview.poster)
+            }
+        }
+    }
+    func restoreRemaining() async {
+        guard !maintaining else { return }
+        let epoch = generation
+        let names = GalleryCatalogStore.shared.packs.map(\.id).filter { metadata[$0] == nil }
+        guard !names.isEmpty else { return }
+        let cards = await Task.detached(priority: .userInitiated) { GalleryDiskCache.read(names: names) }.value
+        guard !Task.isCancelled, !maintaining, generation == epoch else { return }
+        apply(cards)
+    }
+    func item(key: String) -> GalleryPreviewItem {
+        if let item = items[key] { return item }
+        let item = GalleryPreviewItem()
+        items[key] = item; order.append(key)
+        if order.count > 600 {
+            let removed = order.removeFirst()
+            items.removeValue(forKey: removed)?.cancel()
+        }
+        return item
+    }
+    func cancelLoading() { for item in items.values { item.cancel() } }
+    func clearItems() {
+        for item in items.values { item.clear() }
+        metadata.removeAll()
+    }
+}
+
+@MainActor @Observable
+final class GalleryPreviewItem {
+    private(set) var files: GalleryPreviewFiles?
+    private(set) var poster: UIImage?
+    private var task: Task<Void, Never>?
+    private var token = UUID()
+    private var retryAfter = Date.distantPast
+    func restore(files: GalleryPreviewFiles, poster: CGImage) {
+        // A delayed disk read must never overwrite newer, already loaded content.
+        guard self.files == nil, task == nil else { return }
+        self.poster = UIImage(cgImage: poster)
+        self.files = files
+    }
+    func cancel() { token = UUID(); task?.cancel(); task = nil }
+    func clear() { cancel(); files = nil; poster = nil; retryAfter = .distantPast }
+    func load(pack: String, sticker: RemoteSticker, client: WorkerClient, animate: Bool) {
+        let ready = files?.poster != nil && (!animate || sticker.format == "static" || files?.animation != nil)
+        guard !ready, task == nil, Date() >= retryAfter else { return }
+        let token = token
+        task = Task {
+            defer { if self.token == token { task = nil } }
+            do {
+                // Read the complete cached representation first. Never replace a GIF
+                // with a poster-only result each time its card becomes visible.
+                if let cached = await GalleryPreviewStore.shared.cachedFiles(pack: pack, sticker: sticker) {
+                    try Task.checkCancellation()
+                    guard self.token == token else { return }
+                    await publish(cached, token: token)
+                    if !animate || sticker.format == "static" || cached.animation != nil { return }
+                }
+                if files?.poster == nil {
+                    let value = try await GalleryPreviewStore.shared.files(pack: pack, sticker: sticker, client: client, animate: false)
+                    await publish(value, token: token)
+                    if value.poster == nil, sticker.format == "static" { retryAfter = Date().addingTimeInterval(60) }
+                }
+                try Task.checkCancellation()
+                if animate, sticker.format != "static", files?.animation == nil {
+                    let value = try await GalleryPreviewStore.shared.files(pack: pack, sticker: sticker, client: client, animate: true)
+                    await publish(value, token: token)
+                    if value.animation == nil { retryAfter = Date().addingTimeInterval(60) }
+                }
+            } catch is CancellationError { return }
+            catch {
+                if self.token == token { retryAfter = Date().addingTimeInterval(60) }
+                DownloadDiagnostics.shared.record("GALLERY_PREVIEW pack=\(pack) " + DownloadDiagnostics.errorDetails(error))
+            }
+        }
+    }
+    private func publish(_ value: GalleryPreviewFiles, token: UUID) async {
+        guard self.token == token, !Task.isCancelled else { return }
+        // Preserve the already decoded poster and loaded animation on revisits.
+        if poster == nil, let url = value.poster {
+            let image = await Task.detached(priority: .utility) { () -> CGImage? in
+                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+                return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 96, kCGImageSourceShouldCache: false
+                ] as CFDictionary)
+            }.value
+            guard self.token == token, !Task.isCancelled else { return }
+            poster = image.map { UIImage(cgImage: $0) }
+        }
+        files = GalleryPreviewFiles(poster: value.poster ?? files?.poster, animation: value.animation ?? files?.animation)
+    }
 }
 
 /// Preview work never registers BackgroundWork, installs packs or posts notifications.
@@ -37,7 +146,11 @@ actor GalleryPreviewStore {
     }
     func beginMaintenance() async {
         maintenance += 1
-        await MainActor.run { GalleryPreviewState.shared.maintaining = true }
+        await GalleryMetadataStore.shared.beginMaintenance()
+        await MainActor.run {
+            GalleryPreviewState.shared.maintaining = true
+            GalleryPreviewState.shared.clearItems()
+        }
         let pending = Array(jobs.values)
         for job in pending { job.task.cancel() }
         for job in pending { _ = try? await job.task.value }
@@ -48,6 +161,7 @@ actor GalleryPreviewStore {
     func endMaintenance() async {
         maintenance = max(0, maintenance - 1)
         if maintenance == 0 {
+            await GalleryMetadataStore.shared.endMaintenance()
             await MainActor.run {
                 GalleryPreviewState.shared.generation += 1
                 GalleryPreviewState.shared.maintaining = false
@@ -90,6 +204,29 @@ actor GalleryPreviewStore {
                 throw error
             }
         } onCancel: { Task { await self.cancel(key: jobKey, id: job.id) } }
+    }
+    /// Local-only fast path: do not queue downloads, conversions or partial results.
+    func cachedFiles(pack: String, sticker: RemoteSticker) -> GalleryPreviewFiles? {
+        guard maintenance == 0 else { return nil }
+        let fm = FileManager.default
+        let key = Self.key(pack: pack, sticker: sticker)
+        let poster = root.appendingPathComponent(key + ".png")
+        let gif = root.appendingPathComponent(key + ".gif")
+        if fm.fileExists(atPath: poster.path) {
+            let animation = sticker.format != "static" && fm.fileExists(atPath: gif.path) ? gif : nil
+            for file in [poster, animation].compactMap({ $0 }) {
+                try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
+            }
+            return GalleryPreviewFiles(poster: poster, animation: animation)
+        }
+        if let reader = try? LibraryReader.shared(), let snapshot = try? reader.snapshot(resolvingFiles: false),
+           let manifest = snapshot.packs.first(where: { $0.telegramName == pack }),
+           let record = manifest.stickers.first(where: { $0.id == sticker.id }),
+           let poster = try? reader.file(record.thumbnailPath), fm.fileExists(atPath: poster.path) {
+            let animation = (record.playbackPath ?? record.animationPath).flatMap { try? reader.file($0) }
+            return GalleryPreviewFiles(poster: poster, animation: animation.flatMap { fm.fileExists(atPath: $0.path) ? $0 : nil })
+        }
+        return nil
     }
     private func make(pack: String, sticker: RemoteSticker, client: WorkerClient, key: String, animate: Bool) async throws -> GalleryPreviewFiles {
         // Reuse installed playback data before performing any preview network request.
@@ -173,7 +310,7 @@ actor GalleryPreviewStore {
         let fm = FileManager.default
         let entries = ((try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])) ?? [])
             .compactMap { file -> (URL, Int64, Date)? in
-                guard ["png", "gif"].contains(file.pathExtension), let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]) else { return nil }
+                guard ["png", "gif", "json"].contains(file.pathExtension), let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]) else { return nil }
                 return (file, Int64(values.fileSize ?? 0), values.contentModificationDate ?? .distantPast)
             }.sorted { $0.2 < $1.2 }
         var total = entries.reduce(Int64(0)) { $0 + $1.1 }

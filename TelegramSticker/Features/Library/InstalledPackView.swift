@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 
 struct InstalledPackView: View {
     @Environment(\.activeAppTab) private var activeTab
-    @ScaledMetric(relativeTo: .body) private var previewHeight = 180
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let pack: PackManifestV1
@@ -14,22 +13,27 @@ struct InstalledPackView: View {
     let optimize: (Set<String>) -> Void
     let delete: () async -> Void
     @State private var images = StickerImages()
-    @State private var status = "스티커를 탭하면 크게 볼 수 있어요."
+    @State private var status = "길게 눌러 복사하거나 공유할 수 있어요."
     @State private var copiedID: String?
     @State private var sharedPNG: SharedPNG?
-    @State private var preview: Sticker?
     @State private var permissionWarning = false
     @State private var confirmDelete = false
     @State private var confirmStickerDelete = false
     @State private var selecting = false
     @State private var selectedStickers = Set<String>()
+    @State private var stickerFrames: [String: CGRect] = [:]
+    @State private var selectionGestureGeneration = 0
     @State private var columnCount = 4
     @State private var pinchStartColumns: Int?
+    @GestureState private var pinching = false
+    @State private var suppressTapUntil = Date.distantPast
     @State private var storageBytes: Int64?
 
     private var gridZoom: some Gesture {
         MagnifyGesture()
+            .updating($pinching) { _, pinching, _ in pinching = true }
             .onChanged { value in
+                suppressTapUntil = Date().addingTimeInterval(0.35)
                 let startingColumns = pinchStartColumns ?? columnCount
                 pinchStartColumns = startingColumns
                 let columns = min(10, max(2, Int((Double(startingColumns) / value.magnification).rounded())))
@@ -38,7 +42,10 @@ struct InstalledPackView: View {
                     columnCount = columns
                 }
             }
-            .onEnded { _ in pinchStartColumns = nil }
+            .onEnded { _ in
+                pinchStartColumns = nil
+                suppressTapUntil = Date().addingTimeInterval(0.35)
+            }
     }
     @Environment(\.dismiss) private var dismiss
 
@@ -72,11 +79,6 @@ struct InstalledPackView: View {
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columnCount), spacing: 4) {
                     ForEach(stickers) { sticker in
-                        Button {
-                            if selecting {
-                                if !selectedStickers.insert(sticker.id).inserted { selectedStickers.remove(sticker.id) }
-                            } else { preview = preview?.id == sticker.id ? nil : sticker }
-                        } label: {
                             Group {
                                 if sticker.animationURL != nil {
                                     StickerLargePreview(sticker: sticker)
@@ -102,10 +104,19 @@ struct InstalledPackView: View {
                                         .background(.background, in: Capsule()).padding(3)
                                 }
                             }
+                        .background {
+                            GeometryReader { cell in
+                                Color.clear.preference(key: StickerSelectionFrames.self,
+                                    value: [sticker.id: cell.frame(in: .named("stickerSelectionGrid"))])
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .onTapGesture {
+                            guard selecting, !pinching, Date() >= suppressTapUntil else { return }
+                            if !selectedStickers.insert(sticker.id).inserted { selectedStickers.remove(sticker.id) }
+                        }
                         .accessibilityLabel(sticker.animationURL == nil ? sticker.name : "\(sticker.name), 애니메이션")
-                        .accessibilityHint("다시 탭하면 미리보기를 닫아요. 길게 누르면 복사와 공유를 할 수 있어요.")
+                        .accessibilityHint("길게 누르면 복사와 공유를 할 수 있어요.")
+                        .accessibilityAddTraits(selecting && selectedStickers.contains(sticker.id) ? .isSelected : [])
                         .accessibilityIdentifier("installedCopy.\(sticker.id)")
                         .contextMenu {
                             Button("복사", systemImage: "doc.on.doc") { copy(sticker) }
@@ -113,71 +124,60 @@ struct InstalledPackView: View {
                         }
                     }
                 }
+                .coordinateSpace(name: "stickerSelectionGrid")
+                .onPreferenceChange(StickerSelectionFrames.self) { stickerFrames = $0 }
+                .background {
+                    StickerDragSelection(active: selecting && !pinching,
+                                         generation: selectionGestureGeneration,
+                                         frames: stickerFrames, orderedIDs: stickers.map(\.id), selection: $selectedStickers,
+                                         began: { suppressTapUntil = .distantFuture },
+                                         ended: { suppressTapUntil = Date().addingTimeInterval(0.35) })
+                }
             }.padding(.horizontal, 12).padding(.vertical, 8)
         }
+        .onChange(of: geometry.size) { _, _ in selectionGestureGeneration += 1 }
         .simultaneousGesture(gridZoom)
         }
-        .onDisappear { resetSelection() }
+        .onChange(of: columnCount) { _, _ in selectionGestureGeneration += 1 }
+        .onChange(of: horizontalSizeClass) { _, _ in selectionGestureGeneration += 1 }
+        .onChange(of: pinching) { _, active in
+            if !active {
+                pinchStartColumns = nil
+                suppressTapUntil = Date().addingTimeInterval(0.35)
+            }
+        }
+        .onChange(of: horizontalSizeClass, initial: true) { _, sizeClass in
+            columnCount = sizeClass == .regular ? 5 : 4
+            pinchStartColumns = nil
+        }
+        .onChange(of: pack.id) { _, _ in
+            resetSelection()
+            copiedID = nil
+            storageBytes = nil
+            status = "길게 눌러 복사하거나 공유할 수 있어요."
+        }
         .onChange(of: activeTab) { _, tab in
             if tab != .library { resetSelection() }
         }
-        .navigationTitle("")
+        .navigationTitle(pack.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(id: "stickerSelection", placement: .topBarLeading) {
-                Button {
-                    withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35)) {
-                        selecting.toggle(); selectedStickers.removeAll(); preview = nil
-                    }
-                } label: {
-                    Text(selecting ? "완료" : "선택").lineLimit(1).fixedSize(horizontal: true, vertical: false)
+            SelectionControls(id: "stickerSelection", active: selecting, title: "선택") {
+                SelectionControls.update {
+                    selecting.toggle()
+                    selectedStickers.removeAll()
                 }
             }
-            if selecting {
-                ToolbarSpacer(.fixed, placement: .topBarLeading)
-                ToolbarItem(id: "stickerSelectAll", placement: .topBarLeading) {
-                    Button {
-                        let all = Set(stickers.map(\.id))
-                        selectedStickers = selectedStickers == all ? [] : all
-                    } label: {
-                        Text(!stickers.isEmpty && selectedStickers == Set(stickers.map(\.id)) ? "전체 해제" : "전체 선택")
-                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                    }.disabled(stickers.isEmpty)
+            ToolbarItem(id: "stickerShare", placement: .topBarTrailing) {
+                ShareLink(item: PackLinkList.links(for: [pack]).joined(separator: "\n")) {
+                    Label("Sticker Pack 링크 공유", systemImage: "square.and.arrow.up")
                 }
+                .disabled(selecting || PackLinkList.links(for: [pack]).isEmpty)
+                .labelStyle(.iconOnly)
+                .accessibilityIdentifier("sharePackLink")
             }
-            if !selecting {
-                ToolbarItem(placement: .topBarTrailing) {
-                    ShareLink(item: PackLinkList.links(for: [pack]).joined(separator: "\n")) {
-                        Label("Sticker Pack 링크 공유", systemImage: "square.and.arrow.up")
-                    }
-                    .disabled(PackLinkList.links(for: [pack]).isEmpty)
-                    .labelStyle(.iconOnly).accessibilityIdentifier("sharePackLink")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    if pack.telegramName != nil {
-                        Button("업데이트 확인", systemImage: "arrow.clockwise", action: update)
-                            .disabled(selecting || ImportActivity.shared.count > 0)
-                            .accessibilityIdentifier("updatePack")
-                    }
-                    Button(selecting ? "선택한 \(selectedStickers.count)개 용량 최적화" : "용량 최적화", systemImage: "slider.horizontal.3") {
-                        optimize(selecting ? selectedStickers : [])
-                    }
-                    .disabled(ImportActivity.shared.count > 0 || (selecting && selectedStickers.isEmpty))
-                    .accessibilityIdentifier("optimizePack")
-                    if selecting {
-                        Button("선택한 스티커 삭제", systemImage: "trash", role: .destructive) { confirmStickerDelete = true }
-                            .disabled(selectedStickers.isEmpty || ImportActivity.shared.count > 0)
-                    }
-                } label: { Label("옵션", systemImage: "ellipsis") }
-                    .labelStyle(.iconOnly).accessibilityIdentifier("packOptions")
-            }
-            if !selecting {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("팩 삭제", systemImage: "trash", role: .destructive) { confirmDelete = true }
-                        .accessibilityIdentifier("deletePack")
-                }
+            ToolbarItem(id: "stickerOptions", placement: .topBarTrailing) {
+                packOptions
             }
         }
         .alert("키보드 전체 접근을 확인해 주세요", isPresented: $permissionWarning) {
@@ -198,49 +198,12 @@ struct InstalledPackView: View {
                         try await writer.deleteStickers(packID: pack.id, revision: pack.revision, ids: ids)
                         ImportActivity.shared.libraryChangeID += 1
                         selectedStickers.removeAll()
-                        preview = nil
                     } catch { status = error.localizedDescription }
                 }
             }
         }
         .sheet(item: $sharedPNG) { PNGShareSheet(data: $0.data, type: $0.type).presentationDetents([.medium, .large]) }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(pack.title)
-                    .font(.title2.bold())
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .accessibilityAddTraits(.isHeader)
-                    .background(Color(uiColor: .systemBackground))
-                if let preview {
-                    VStack(spacing: 8) {
-                        StickerLargePreview(sticker: preview)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: min(280, previewHeight + (horizontalSizeClass == .regular ? 40 : 0)))
-                            .clipped()
-                            .id(preview.id)
-                            .transition(.opacity)
-                        if let record = pack.stickers.first(where: { preview.id == pack.id + "." + $0.id }), let quality = record.conversionQuality {
-                            Text(quality.hasPrefix("용량 최적화") ? quality : "자동 품질 조절 · \(quality)").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .onTapGesture { self.preview = nil }
-                    .contextMenu {
-                        Button("복사", systemImage: "doc.on.doc") { copy(preview) }
-                        Button("공유", systemImage: "square.and.arrow.up") { share(preview, animated: preview.animationURL != nil) }
-                    }
-                    .controlSize(.regular)
-                    .buttonBorderShape(.capsule)
-                    .padding(16)
-                    .frame(maxWidth: .infinity)
-                    .background(Color(uiColor: .systemBackground))
-                    .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
-                }
-            }
-        }
-        .animation(reduceMotion ? .easeInOut(duration: 0.18) : .spring(response: 0.38, dampingFraction: 0.86), value: preview?.id)
-        .task(id: pack.revision) {
+        .task(id: pack.id + "." + pack.revision) {
             let pack = pack
             let bytes = await Task.detached(priority: .utility) { () -> Int64? in
                 guard let reader = try? LibraryReader.shared() else { return nil }
@@ -263,6 +226,29 @@ struct InstalledPackView: View {
         }
     }
 
+    private var packOptions: some View {
+        Menu {
+                    if pack.telegramName != nil {
+                        Button("업데이트 확인", systemImage: "arrow.clockwise", action: update)
+                            .disabled(selecting || ImportActivity.shared.count > 0)
+                            .accessibilityIdentifier("updatePack")
+                    }
+                    Button(selecting ? "선택한 \(selectedStickers.count)개 용량 최적화" : "용량 최적화", systemImage: "slider.horizontal.3") {
+                        optimize(selecting ? selectedStickers : [])
+                    }
+                    .disabled(ImportActivity.shared.count > 0 || (selecting && selectedStickers.isEmpty))
+                    .accessibilityIdentifier("optimizePack")
+                    if selecting {
+                        Button("선택한 스티커 삭제", systemImage: "trash", role: .destructive) { confirmStickerDelete = true }
+                            .disabled(selectedStickers.isEmpty || ImportActivity.shared.count > 0)
+                    } else {
+                        Button("팩 삭제", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                            .disabled(ImportActivity.shared.count > 0)
+                    }
+                } label: { Label("옵션", systemImage: "ellipsis") }
+                    .labelStyle(.iconOnly).accessibilityIdentifier("packOptions")
+    }
+
     private func copy(_ sticker: Sticker, asPNG: Bool = false) {
         permissionWarning = KeyboardAccessReceipt.lastAllowed == nil
         let result = StickerCopyService().copy(sticker, isAllowed: true, asPNG: asPNG)
@@ -280,11 +266,11 @@ struct InstalledPackView: View {
         } catch { status = "이미지를 공유할 수 없어요. 팩을 다시 확인해 주세요." }
     }
     private func resetSelection() {
+        selectionGestureGeneration += 1
         selecting = false
         selectedStickers.removeAll()
         confirmDelete = false
         confirmStickerDelete = false
-        preview = nil
     }
 
 }

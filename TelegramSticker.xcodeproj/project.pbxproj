@@ -10,10 +10,10 @@
 		1C6F0855307803AA00577D61 /* StickerKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1C6F084E307803AA00577D61 /* StickerKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BA2000010000000000000001 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = BA2000010000000000000002 /* Lottie */; };
 		BA2000020000000000000001 /* StickerVP9 in Frameworks */ = {isa = PBXBuildFile; productRef = BA2000020000000000000002 /* StickerVP9 */; };
-		BC3000020000000000000001 /* KeyboardSelectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000001 /* KeyboardSelectionStore.swift */; };
-		BC3000020000000000000002 /* KeyboardPackOrderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000002 /* KeyboardPackOrderStore.swift */; };
-		BC3000020000000000000003 /* RecentStickerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000003 /* RecentStickerStore.swift */; };
-		BC3000020000000000000004 /* StickerGridLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000004 /* StickerGridLayout.swift */; };
+		BC3000020000000000000001 /* StickerKeyboard/State/KeyboardSelectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000001 /* StickerKeyboard/State/KeyboardSelectionStore.swift */; };
+		BC3000020000000000000002 /* StickerKeyboard/State/KeyboardPackOrderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000002 /* StickerKeyboard/State/KeyboardPackOrderStore.swift */; };
+		BC3000020000000000000003 /* StickerKeyboard/State/RecentStickerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000003 /* StickerKeyboard/State/RecentStickerStore.swift */; };
+		BC3000020000000000000004 /* StickerKeyboard/Views/StickerGridLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000004 /* StickerKeyboard/Views/StickerGridLayout.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,10 +57,10 @@
 		1C6F082F3078037600577D61 /* TelegramStickerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TelegramStickerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1C6F08393078037600577D61 /* TelegramStickerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TelegramStickerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1C6F084E307803AA00577D61 /* StickerKeyboard.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StickerKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		BC3000010000000000000001 /* KeyboardSelectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickerKeyboard/State/KeyboardSelectionStore.swift; sourceTree = SOURCE_ROOT; };
-		BC3000010000000000000002 /* KeyboardPackOrderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickerKeyboard/State/KeyboardPackOrderStore.swift; sourceTree = SOURCE_ROOT; };
-		BC3000010000000000000003 /* RecentStickerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickerKeyboard/State/RecentStickerStore.swift; sourceTree = SOURCE_ROOT; };
-		BC3000010000000000000004 /* StickerGridLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickerKeyboard/Views/StickerGridLayout.swift; sourceTree = SOURCE_ROOT; };
+		BC3000010000000000000001 /* StickerKeyboard/State/KeyboardSelectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickerKeyboard/State/KeyboardSelectionStore.swift; sourceTree = SOURCE_ROOT; };
+		BC3000010000000000000002 /* StickerKeyboard/State/KeyboardPackOrderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickerKeyboard/State/KeyboardPackOrderStore.swift; sourceTree = SOURCE_ROOT; };
+		BC3000010000000000000003 /* StickerKeyboard/State/RecentStickerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickerKeyboard/State/RecentStickerStore.swift; sourceTree = SOURCE_ROOT; };
+		BC3000010000000000000004 /* StickerKeyboard/Views/StickerGridLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickerKeyboard/Views/StickerGridLayout.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -163,10 +163,10 @@
 		BC3000030000000000000001 /* Keyboard test sources */ = {
 			isa = PBXGroup;
 			children = (
-				BC3000010000000000000001 /* KeyboardSelectionStore.swift */,
-				BC3000010000000000000002 /* KeyboardPackOrderStore.swift */,
-				BC3000010000000000000003 /* RecentStickerStore.swift */,
-				BC3000010000000000000004 /* StickerGridLayout.swift */,
+				BC3000010000000000000001 /* StickerKeyboard/State/KeyboardSelectionStore.swift */,
+				BC3000010000000000000002 /* StickerKeyboard/State/KeyboardPackOrderStore.swift */,
+				BC3000010000000000000003 /* StickerKeyboard/State/RecentStickerStore.swift */,
+				BC3000010000000000000004 /* StickerKeyboard/Views/StickerGridLayout.swift */,
 			);
 			name = "Keyboard test sources";
 			sourceTree = "<group>";
@@ -348,10 +348,10 @@
 		1C6F082B3078037600577D61 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
-				BC3000020000000000000001 /* KeyboardSelectionStore.swift in Sources */,
-				BC3000020000000000000002 /* KeyboardPackOrderStore.swift in Sources */,
-				BC3000020000000000000003 /* RecentStickerStore.swift in Sources */,
-				BC3000020000000000000004 /* StickerGridLayout.swift in Sources */,
+				BC3000020000000000000001 /* StickerKeyboard/State/KeyboardSelectionStore.swift in Sources */,
+				BC3000020000000000000002 /* StickerKeyboard/State/KeyboardPackOrderStore.swift in Sources */,
+				BC3000020000000000000003 /* StickerKeyboard/State/RecentStickerStore.swift in Sources */,
+				BC3000020000000000000004 /* StickerKeyboard/Views/StickerGridLayout.swift in Sources */,
 			);
 		};
 		1C6F08353078037600577D61 /* Sources */ = {

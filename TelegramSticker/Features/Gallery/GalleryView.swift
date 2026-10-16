@@ -33,10 +33,13 @@ private struct GalleryInstallation: Identifiable {
 struct GalleryView: View {
     @Bindable private var catalog = GalleryCatalogStore.shared
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var galleryVisible = false
     @State private var selected = Set<String>()
     @State private var installed = Set<String>()
-    @State private var client: WorkerClient?
+    @State private var client: WorkerClient? = {
+        (try? ImportSettings.load()).map { WorkerClient(configuration: $0) }
+    }()
     @State private var installation: GalleryInstallation?
     @State private var error: String?
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 320), spacing: 12)]
@@ -65,12 +68,11 @@ struct GalleryView: View {
             .refreshable { if let client { await catalog.refresh(client: client, force: true) } }
             .navigationTitle("갤러리")
             .toolbar {
-                if !selected.isEmpty { Button("선택 해제") { selected.removeAll() } }
+                Button("선택 해제") { selected.removeAll() }.disabled(selected.isEmpty)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 8) {
-                    if !selected.isEmpty {
-                        Button {
+                    Button {
                             guard ImportActivity.shared.count == 0, LibraryWriter.shared != nil else { return }
                             let links = catalog.packs.filter { selected.contains($0.id) && !installed.contains($0.id) }.map(\.link)
                             guard !links.isEmpty else { return }
@@ -81,9 +83,12 @@ struct GalleryView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glassProminent).controlSize(.large)
-                        .disabled(ImportActivity.shared.count > 0 || LibraryWriter.shared == nil)
+                        .disabled(selected.isEmpty || ImportActivity.shared.count > 0 || LibraryWriter.shared == nil)
                         .padding(.horizontal, 16).padding(.top, 8)
-                    }
+                        .opacity(selected.isEmpty ? 0 : 1)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: selected.isEmpty)
+                        .allowsHitTesting(!selected.isEmpty)
+                        .accessibilityHidden(selected.isEmpty)
                     CurrentWorkBanner()
                 }
             }
@@ -94,6 +99,7 @@ struct GalleryView: View {
                 Button("확인", role: .cancel) {}
             } message: { Text(error ?? "") }
             .task {
+                await GalleryPreviewState.shared.restoreRemaining()
                 do {
                     if client == nil, let config = try ImportSettings.load() { client = WorkerClient(configuration: config) }
                 } catch { self.error = error.localizedDescription }
@@ -104,8 +110,9 @@ struct GalleryView: View {
                 galleryVisible = true
                 if let client { Task { await catalog.refresh(client: client) } }
             }
-            .onDisappear { galleryVisible = false }
+            .onDisappear { galleryVisible = false; GalleryPreviewState.shared.cancelLoading() }
             .onChange(of: scenePhase) { _, phase in
+                if phase != .active { GalleryPreviewState.shared.cancelLoading() }
                 if phase == .active, galleryVisible, let client { Task { await catalog.refresh(client: client) } }
             }
             .onChange(of: catalog.packs.map(\.id)) { _, ids in selected.formIntersection(ids) }
@@ -132,8 +139,9 @@ private struct GalleryPackCard: View {
     let galleryVisible: Bool
     let select: () -> Void
     @State private var cardVisible = false
-    @State private var pack: RemotePack?
+    private var pack: RemotePack? { previewCache.metadata[entry.id] }
     @State private var previewUnavailable = false
+    @Bindable private var previewCache = GalleryPreviewState.shared
 
     var body: some View {
         Button(action: select) {
@@ -173,11 +181,19 @@ private struct GalleryPackCard: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel((pack?.title ?? entry.title) + (installed ? ", 설치됨" : selected ? ", 선택됨" : ", 선택 안 됨"))
         .onScrollVisibilityChange(threshold: 0.01) { cardVisible = $0 }
-        .task(id: "\(cardVisible && galleryVisible)-\(client != nil)") {
-            guard cardVisible, galleryVisible, let client, pack == nil else { return }
-            do { pack = try await GalleryMetadataStore.shared.pack(name: entry.id, client: client); previewUnavailable = false }
+        .task(id: "\(cardVisible && galleryVisible)-\(client != nil)-\(previewCache.generation)") {
+            guard cardVisible, galleryVisible, !previewCache.maintaining, let client else { return }
+            // Publish durable metadata before waiting for a freshness check.
+            if let cached = await GalleryMetadataStore.shared.cached(name: entry.id) {
+                previewCache.metadata[entry.id] = cached; previewUnavailable = false
+            }
+            do {
+                let refreshed = try await GalleryMetadataStore.shared.pack(name: entry.id, client: client)
+                try Task.checkCancellation()
+                previewCache.metadata[entry.id] = refreshed; previewUnavailable = false
+            }
             catch is CancellationError { return }
-            catch { previewUnavailable = true }
+            catch { previewUnavailable = pack == nil }
         }
     }
 }

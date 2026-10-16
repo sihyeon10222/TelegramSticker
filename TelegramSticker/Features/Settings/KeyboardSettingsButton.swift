@@ -6,7 +6,7 @@ struct KeyboardSettingsButton: View {
     var destination: KeyboardSetupAction.Kind = .fullAccess
     @State private var failedToOpen = false
     var body: some View {
-        Button("아이폰 설정 열기", systemImage: "gear") {
+        Button {
             Task { @MainActor in
                 switch destination {
                 case .add:
@@ -18,7 +18,14 @@ struct KeyboardSettingsButton: View {
                     failedToOpen = !(await UIApplication.shared.open(url))
                 }
             }
-        }.buttonStyle(.glass)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "gear")
+                Text("아이폰 설정 열기")
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(.glass)
             .alert("설정에서 직접 이동해 주세요", isPresented: $failedToOpen) {
                 Button("확인", role: .cancel) {}
             } message: {

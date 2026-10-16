@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 @MainActor @Observable
 final class LibraryModel {
+    @ObservationIgnored private var stickerCache: [String: [Sticker]] = [:]
+    @ObservationIgnored private var coverCache: [String: Sticker] = [:]
     var packs: [PackManifestV1] = []
     var damagedPacks: [PackReference] = []
     var message: String?
@@ -32,6 +34,9 @@ final class LibraryModel {
         do {
             let (snapshot, references) = try await Task.detached { (try reader.snapshot(resolvingFiles: false), try reader.index().packs) }.value
             packs = snapshot.packs
+            let revisions = Set(packs.map { $0.id + "." + $0.revision })
+            stickerCache = stickerCache.filter { revisions.contains($0.key) }
+            coverCache = coverCache.filter { revisions.contains($0.key) }
             damagedPacks = references.filter { reference in !snapshot.packs.contains { $0.id == reference.id } }
             message = snapshot.warnings.first
         } catch { message = error.localizedDescription }
@@ -76,19 +81,28 @@ final class LibraryModel {
     }
 
     func stickers(in pack: PackManifestV1) -> [Sticker] {
+        let key = pack.id + "." + pack.revision
+        if let cached = stickerCache[key] { return cached }
         guard let reader else { return [] }
-        return pack.stickers.compactMap { record in
+        let result: [Sticker] = pack.stickers.compactMap { record in
             guard let png = try? reader.file(record.pngPath),
                   let thumbnail = try? reader.file(record.thumbnailPath) else { return nil }
             return Sticker(id: "\(pack.id).\(record.id)", name: record.name, detail: pack.title,
                                  imageURL: png, thumbnailURL: thumbnail,
                                  animationURL: record.animationPath.flatMap { try? reader.file($0) })
         }
+        stickerCache[key] = result
+        return result
     }
 
     func cover(in pack: PackManifestV1) -> Sticker? {
+        let key = pack.id + "." + pack.revision
+        if let cached = coverCache[key] { return cached }
         guard let reader, let record = pack.stickers.first,
               let url = try? reader.file(record.thumbnailPath) else { return nil }
-        return Sticker(id: pack.id, name: pack.title, detail: "", thumbnailURL: url)
+        let cover = Sticker(id: key, name: pack.title, detail: "", thumbnailURL: url,
+                            animationURL: (record.playbackPath ?? record.animationPath).flatMap { try? reader.file($0) })
+        coverCache[key] = cover
+        return cover
     }
 }

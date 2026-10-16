@@ -33,6 +33,7 @@ struct KeyboardSetupAction: View {
                 : "열리는 StickerBridge 설정에서 키보드 → 전체 접근 허용을 켜 주세요. 키보드는 입력 내용을 수집하지 않아요.")
                 .font(.footnote).foregroundStyle(.secondary)
             KeyboardSettingsButton(destination: kind)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .onChange(of: scenePhase) { _, phase in if phase == .active { access.refresh() } }
         .task {

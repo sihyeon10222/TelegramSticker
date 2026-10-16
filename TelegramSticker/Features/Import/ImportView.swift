@@ -186,12 +186,18 @@ struct ImportView: View {
                         ))
                     }
                     if initialPackName == nil {
-                        Button("링크 목록 파일 가져오기", systemImage: "doc.badge.plus") { explainLinkFile = true }
-                            .buttonStyle(.glass).disabled(model.busy || updating)
-                            .accessibilityIdentifier("importPackLinkFile")
-                        Button { model.additionalLinks.append(AdditionalPackLink()) } label: {
-                            Label("링크 추가", systemImage: "plus.circle")
-                        }.buttonStyle(.glass).disabled(model.busy || updating).accessibilityIdentifier("addPackLink")
+                        HStack(spacing: 8) {
+                            Button("링크 목록 파일 가져오기", systemImage: "doc.badge.plus") { explainLinkFile = true }
+                                .buttonStyle(.glass).disabled(model.busy || updating)
+                                .accessibilityIdentifier("importPackLinkFile")
+                            Spacer(minLength: 0)
+                            Button { model.additionalLinks.append(AdditionalPackLink()) } label: {
+                                Label("링크 추가", systemImage: "plus.circle")
+                            }.buttonStyle(.glass).disabled(model.busy || updating).accessibilityIdentifier("addPackLink")
+                        }
+                        .font(.subheadline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                         if !model.additionalLinks.isEmpty || PackLinkList.split(model.link).count > 1 || !model.batchStatuses.isEmpty || model.restoringOriginal {
                             Button { focusedLink = nil; model.downloadBatch() } label: {
                                 Label(model.restoringOriginal ? "입력한 팩 원본 복원" : (updating ? "입력한 팩 모두 업데이트 확인" : "입력한 팩 모두 설치"), systemImage: "arrow.down.circle").frame(maxWidth: .infinity)

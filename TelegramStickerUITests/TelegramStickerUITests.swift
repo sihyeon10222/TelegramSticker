@@ -376,3 +376,123 @@ final class TelegramStickerUITests: XCTestCase {
 
 
 }
+
+
+// Rotation regressions: exercise the state present before changing size classes.
+extension TelegramStickerUITests {
+    @MainActor
+    func testRotationFromLibrarySelectionStates() {
+        let app = configuredApp()
+        app.launchArguments += ["--keyboard-ui-fixture"]
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.launch()
+        let edit = app.buttons.matching(identifier: "selectionToggle").firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 20))
+        for state in 0..<3 {
+            if state > 0 { edit.tap() }
+            if state == 2 { app.buttons["selectionAll"].tap() }
+            for orientation in [UIDeviceOrientation.landscapeLeft, .portrait, .landscapeRight, .portrait] {
+                XCUIDevice.shared.orientation = orientation
+                let landscape = orientation.isLandscape
+                let ready = NSPredicate { _, _ in (app.frame.width > app.frame.height) == landscape }
+                XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 10), .completed)
+                XCTAssertTrue(edit.isHittable)
+                XCTAssertEqual(edit.label, state == 0 ? "편집" : "완료")
+                if state > 0 {
+                    let all = app.buttons["selectionAll"]
+                    XCTAssertTrue(all.isHittable)
+                    XCTAssertEqual(all.label, state == 2 ? "전체 해제" : "전체 선택")
+                    XCTAssertGreaterThanOrEqual(all.frame.minX - edit.frame.maxX, 4)
+                    XCTAssertEqual(all.frame.midY, edit.frame.midY, accuracy: 2)
+                }
+                let shot = XCTAttachment(screenshot: app.screenshot())
+                shot.name = "Library state \(state) orientation \(orientation.rawValue)"
+                shot.lifetime = .keepAlways
+                add(shot)
+            }
+            if state > 0 { edit.tap() }
+        }
+    }
+
+    @MainActor
+    func testRotationFromDetailSelectionStates() {
+        let app = configuredApp()
+        app.launchArguments += ["--keyboard-ui-fixture"]
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.launch()
+        let row = app.buttons["pack.keyboard-ui-a"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20))
+        row.tap()
+        let sticker = app.descendants(matching: .any).matching(identifier: "installedCopy.keyboard-ui-a.item-1").firstMatch
+        XCTAssertTrue(sticker.waitForExistence(timeout: 10))
+        for state in 0..<3 {
+            if state > 0 {
+                app.buttons.matching(identifier: "selectionToggle").firstMatch.tap()
+                if state == 1 { sticker.tap() }
+                else { app.buttons["selectionAll"].tap() }
+            }
+            for orientation in [UIDeviceOrientation.landscapeLeft, .portrait, .landscapeRight, .portrait] {
+                XCUIDevice.shared.orientation = orientation
+                let ready = NSPredicate { _, _ in (app.frame.width > app.frame.height) == orientation.isLandscape }
+                XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 10), .completed)
+                XCTAssertTrue(sticker.exists)
+                if state == 1 {
+                    XCTAssertTrue(sticker.isSelected)
+                    XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "selectionToggle", "완료")).firstMatch.isHittable)
+                    XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "selectionAll", "전체 선택")).firstMatch.isHittable)
+                }
+                if state == 2 {
+                    XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "selectionAll", "전체 해제")).firstMatch.isHittable)
+                }
+                let shot = XCTAttachment(screenshot: app.screenshot())
+                shot.name = "Detail state \(state) orientation \(orientation.rawValue)"
+                shot.lifetime = .keepAlways
+                add(shot)
+            }
+            if state > 0 { app.buttons.matching(identifier: "selectionToggle").firstMatch.tap() }
+        }
+    }
+}
+
+
+extension TelegramStickerUITests {
+    @MainActor
+    func testRotationSidebarCanReopenAfterRotation() {
+        let app = configuredApp()
+        app.launchArguments += ["--keyboard-ui-fixture"]
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.launch()
+        let row = app.buttons["pack.keyboard-ui-a"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20))
+        row.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "installedCopy.keyboard-ui-a.item-1").firstMatch.waitForExistence(timeout: 10))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let toggle = app.buttons["librarySidebarToggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        toggle.tap()
+        XCTAssertFalse(row.isHittable)
+        for orientation in [UIDeviceOrientation.portrait, .landscapeRight, .portrait, .landscapeLeft] {
+            XCUIDevice.shared.orientation = orientation
+            let ready = NSPredicate { _, _ in (app.frame.width > app.frame.height) == orientation.isLandscape }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 10), .completed)
+            XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "installedCopy.keyboard-ui-a.item-1").firstMatch.exists)
+            if orientation.isLandscape {
+                XCTAssertTrue(toggle.isHittable)
+                let sidebarEdit = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "selectionToggle", "편집")).firstMatch
+                XCTAssertTrue(sidebarEdit.isHittable)
+                toggle.tap()
+                XCTAssertFalse(sidebarEdit.isHittable)
+                toggle.tap()
+                XCTAssertTrue(sidebarEdit.isHittable)
+            }
+        }
+        let sidebarEdit = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "selectionToggle", "편집")).firstMatch
+        XCTAssertTrue(sidebarEdit.isHittable, app.debugDescription)
+        // The fixture can be below the viewport; tapping scrolls it into view.
+        row.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "installedCopy.keyboard-ui-a.item-1").firstMatch.exists)
+    }
+}

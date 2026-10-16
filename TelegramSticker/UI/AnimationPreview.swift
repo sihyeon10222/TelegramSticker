@@ -5,6 +5,7 @@ import ImageIO
 struct StickerLargePreview: UIViewRepresentable {
     let sticker: Sticker
     var pixels: Int = 256
+    var paused = false
     func makeUIView(context: Context) -> GIFPlaybackView {
         let view = GIFPlaybackView(); view.contentMode = .scaleAspectFit
         view.clipsToBounds = true
@@ -22,12 +23,13 @@ struct StickerLargePreview: UIViewRepresentable {
         CGSize(width: proposal.width ?? 240, height: proposal.height ?? 240)
     }
     func updateUIView(_ view: GIFPlaybackView, context: Context) {
+        view.playbackPaused = paused
         let renderingID = sticker.id + ":\(pixels)"
         guard context.coordinator.id != renderingID else { return }
         context.coordinator.id = renderingID
         context.coordinator.task?.cancel()
         view.configure(url: sticker.animationURL, poster: nil, pixels: pixels, repeatForever: true)
-        let id = renderingID, url = sticker.fileURL()
+        let id = renderingID, url = sticker.thumbnailURL ?? sticker.fileURL()
         context.coordinator.task = Task { @MainActor [weak view] in
             let image = await Task.detached { () -> CGImage? in
                 guard let url, let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }

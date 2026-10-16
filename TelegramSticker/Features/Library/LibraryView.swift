@@ -3,6 +3,9 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct LibraryView: View {
+    @State private var columnVisibility = NavigationSplitViewVisibility.automatic
+    @State private var compactColumn = NavigationSplitViewColumn.sidebar
+    @Environment(\.horizontalSizeClass) private var systemSizeClass
     @Environment(\.activeAppTab) private var activeTab
     @State private var model = LibraryModel()
     @State private var selected: String?
@@ -11,29 +14,55 @@ struct LibraryView: View {
     @State private var bulkSelected = Set<String>()
     @State private var optimizationRequest: OptimizationRequest?
     @State private var coverImages = StickerImages()
-    @State private var bottomActionsHeight: CGFloat = 72
     @State private var confirmBulkDelete = false
     @State private var sharing = false
     @State private var sharingPack: PackManifestV1?
     @State private var deletingPack: PackManifestV1?
+    @State private var editingActionsHeight: CGFloat = 0
+    @State private var workBannerHeight: CGFloat = 0
+    @State private var draggingPack: String?
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    // Navigation selection and edit selection have different lifetimes. Completing
+    // editing must not clear the currently displayed pack's sidebar highlight.
+    private func listSelection(preservingDetail: Bool) -> Binding<Set<String>> {
+        // A List can deliver its final deselection after EditMode has changed.
+        // Route that callback using the mode of the binding it received, rather
+        // than re-reading the new mode and clearing navigation by mistake.
+        let editing = editMode.isEditing
+        return Binding(get: {
+            editing ? bulkSelected : Set(selected.map { [$0] } ?? [])
+        }, set: { ids in
+            // Also handle a two-finger selection gesture that has just entered
+            // editing while List still holds its previous navigation binding.
+            if editing || editMode.isEditing { bulkSelected = ids }
+            else if let id = ids.first { selected = id }
+            else if !preservingDetail { selected = nil }
+        })
+    }
+
     private func packRow(_ pack: PackManifestV1) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Group {
-                if let cover = model.cover(in: pack), let image = coverImages.thumbnail(for: cover) {
+                if let cover = model.cover(in: pack), cover.animationURL != nil {
+                    StickerLargePreview(sticker: cover, pixels: 64, paused: activeTab != .library || scenePhase != .active).padding(3)
+                } else if let cover = model.cover(in: pack), let image = coverImages.thumbnail(for: cover) {
                     Image(uiImage: image).resizable().scaledToFit().padding(6)
                 } else { Image(systemName: "square.stack").foregroundStyle(.secondary) }
             }
-            .frame(width: 52, height: 52)
+            .frame(width: 44, height: 44)
             .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
             .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(pack.title).font(.body.weight(.semibold)).lineLimit(2, reservesSpace: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pack.title).font(.body.weight(.semibold)).lineLimit(1).truncationMode(.tail)
+                    .accessibilityLabel(pack.title)
                 Text("스티커 \(pack.stickers.count)개").font(.caption).foregroundStyle(.secondary)
                 if let checked = pack.lastCheckedAt {
-                    Text("최근 확인 \(checked.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(.secondary)
+                    Text("최근 확인 \(checked.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).locale(Locale(identifier: "ko_KR"))))")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1).minimumScaleFactor(0.85)
                 }
                 if let pending = pack.pendingStickerIDs, !pending.isEmpty {
                     Text("설치 \(pack.stickers.count)/\(pack.originalCount) · 실패 \(pending.count)")
@@ -41,11 +70,15 @@ struct LibraryView: View {
                         .accessibilityIdentifier("partial.\(pack.id)")
                 }
             }
-            Spacer(minLength: 0)
-
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+            FixedPackChevron()
+                .frame(width: 12, height: 20)
+                .accessibilityHidden(true)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 0)
         .contextMenu {
+            if !editMode.isEditing {
             Button("업데이트 확인", systemImage: "arrow.clockwise") { updatePack(pack) }
                 .disabled(pack.telegramName == nil || ImportActivity.shared.count > 0)
             Button("용량 최적화", systemImage: "slider.horizontal.3") { optimizationRequest = OptimizationRequest(packIDs: [pack.id]) }
@@ -55,6 +88,7 @@ struct LibraryView: View {
             }.disabled(PackLinkList.links(for: [pack]).isEmpty)
             Button("삭제", systemImage: "trash", role: .destructive) { deletingPack = pack }
                 .disabled(ImportActivity.shared.count > 0)
+            }
         }
         .confirmationDialog("이 팩을 삭제할까요?", isPresented: Binding(
             get: { deletingPack?.id == pack.id }, set: { if !$0 { deletingPack = nil } }
@@ -71,9 +105,9 @@ struct LibraryView: View {
     }
 
     private func toggleSelection(sharing share: Bool) {
-        withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.4, dampingFraction: 0.82)) {
+        SelectionControls.update {
             if editMode == .active && sharing == share {
-                editMode = .inactive; sharing = false
+                editMode = .inactive
             } else {
                 sharing = share
                 bulkSelected = share ? Set(model.packs.map(\.id)) : []
@@ -82,20 +116,20 @@ struct LibraryView: View {
         }
     }
 
-    private var packEditingActions: some View {
+    private func packEditingActions(compact: Bool) -> some View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 8) {
-                Button("업데이트 확인") {
+                Button {
                     let links = model.packs.filter { bulkSelected.contains($0.id) }
                         .compactMap { $0.telegramName.map { "https://t.me/addstickers/" + $0 } }
                     importRequest = PackImportRequest(name: nil, updating: true, links: links)
-                }
+                } label: { actionLabel("업데이트 확인", icon: "arrow.clockwise", compact: compact) }
                 .disabled(!model.packs.contains { bulkSelected.contains($0.id) && $0.telegramName != nil } || ImportActivity.shared.count > 0)
                 .tint(.blue).accessibilityIdentifier("updateSelectedPacks")
-                Button("용량 최적화") { optimizationRequest = OptimizationRequest(packIDs: bulkSelected) }
+                Button { optimizationRequest = OptimizationRequest(packIDs: bulkSelected) } label: { actionLabel("용량 최적화", icon: "slider.horizontal.3", compact: compact) }
                     .disabled(bulkSelected.isEmpty || ImportActivity.shared.count > 0)
                     .tint(.indigo).accessibilityIdentifier("optimizeSelectedPacks")
-                Button("삭제", role: .destructive) { confirmBulkDelete = true }
+                Button(role: .destructive) { confirmBulkDelete = true } label: { actionLabel("삭제", icon: "trash", compact: compact) }
                     .disabled(bulkSelected.isEmpty || ImportActivity.shared.count > 0)
                     .tint(.red).accessibilityIdentifier("deleteSelectedPacks")
                     .confirmationDialog("선택한 \(bulkSelected.count)개 팩을 삭제할까요?", isPresented: $confirmBulkDelete, titleVisibility: .visible) {
@@ -111,12 +145,29 @@ struct LibraryView: View {
             .controlSize(.large)
             .lineLimit(1)
         }
-        .padding(12)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+    }
+
+    private func actionLabel(_ title: String, icon: String, compact: Bool) -> some View {
+        Group {
+            if compact { Label(title, systemImage: icon).labelStyle(.iconOnly) }
+            else { Label(title, systemImage: icon).labelStyle(.titleOnly) }
+        }
+    }
+
+    private func addPack() {
+        if ImportActivity.shared.current?.busy == true { ImportActivity.shared.presentCurrent() }
+        else if OptimizationCenter.shared.current?.running == true { OptimizationCenter.shared.presentCurrent() }
+        else { importRequest = PackImportRequest(name: nil, updating: false) }
     }
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $bulkSelected) {
+        GeometryReader { geometry in
+        let wideLayout = geometry.size.width >= 600 && (UIDevice.current.userInterfaceIdiom == .pad || geometry.size.width > geometry.size.height)
+        let sidebarMaximum = geometry.size.width / 3
+        let sidebarMinimum = min(300, sidebarMaximum)
+        NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: $compactColumn) {
+            List(selection: listSelection(preservingDetail: wideLayout)) {
                 if let message = model.message {
                     Section { Text(message).foregroundStyle(.secondary).accessibilityIdentifier("libraryMessage") }
                 }
@@ -139,37 +190,67 @@ struct LibraryView: View {
                 }
                 Section("설치된 팩") {
                     ForEach(model.packs) { pack in
-                        NavigationLink(value: pack.id) { packRow(pack) }
-                            .tag(pack.id)
+                        NavigationLink(value: pack.id) {
+                            packRow(pack)
+                                .contentShape(Rectangle())
+                                .onDrag {
+                                    guard editMode.isEditing, !model.isBusy, model.damagedPacks.isEmpty,
+                                          ImportActivity.shared.count == 0 else { return NSItemProvider() }
+                                    draggingPack = pack.id
+                                    return NSItemProvider(object: pack.id as NSString)
+                                }
+                        }
+                        .navigationLinkIndicatorVisibility(.hidden)
+                        .tag(pack.id)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .onDrop(of: [.text], isTargeted: nil) { providers in
+                            guard editMode.isEditing, !model.isBusy, ImportActivity.shared.count == 0,
+                                  model.damagedPacks.isEmpty,
+                                  let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
+                            provider.loadObject(ofClass: NSString.self) { object, _ in
+                                guard let sourceID = object as? String else { return }
+                                Task { @MainActor in
+                                    guard editMode.isEditing,
+                                          let source = model.packs.firstIndex(where: { $0.id == sourceID }),
+                                          let target = model.packs.firstIndex(where: { $0.id == pack.id }), source != target else { return }
+                                    draggingPack = nil
+                                    await model.move(from: IndexSet(integer: source), to: target > source ? target + 1 : target)
+                                }
+                            }
+                            return true
+                        }
                         .accessibilityIdentifier("pack.\(pack.id)")
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             Button("업데이트 확인", systemImage: "arrow.clockwise") { updatePack(pack) }
-                                .tint(.blue).disabled(pack.telegramName == nil || ImportActivity.shared.count > 0)
+                                .labelStyle(.iconOnly).tint(.blue).disabled(pack.telegramName == nil || ImportActivity.shared.count > 0)
                             Button("용량 최적화", systemImage: "slider.horizontal.3") { optimizationRequest = OptimizationRequest(packIDs: [pack.id]) }
-                                .tint(.indigo).disabled(ImportActivity.shared.count > 0)
+                                .labelStyle(.iconOnly).tint(.indigo).disabled(ImportActivity.shared.count > 0)
                             Button("공유", systemImage: "square.and.arrow.up") { sharingPack = pack }
-                                .tint(.teal).disabled(pack.telegramName == nil)
+                                .labelStyle(.iconOnly).tint(.teal).disabled(pack.telegramName == nil)
                         }
                         .swipeActions(edge: .trailing) {
                             Button("삭제", systemImage: "trash", role: .destructive) {
                                 Task { await model.delete(ids: [pack.id]) }
-                            }
+                            }.labelStyle(.iconOnly)
                         }
                     }
-                    .onMove { source, destination in Task { await model.move(from: source, to: destination) } }
-                    .moveDisabled(!model.damagedPacks.isEmpty || ImportActivity.shared.count > 0)
+
                 }
+                .listRowBackground(wideLayout ? Color.clear : nil)
+                .listSectionMargins(.leading, 20)
+                .listSectionMargins(.trailing, 20)
             }
-            .onChange(of: bulkSelected) { _, ids in
-                if editMode != .active, let id = ids.first { selected = id }
-            }
+            // Use the same symmetric section/selection geometry in both columns.
+            // Automatic style switches to a sidebar-specific selection gutter.
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(wideLayout ? .hidden : .automatic)
+            .background(wideLayout ? Color(uiColor: .systemBackground) : Color.clear)
+            .environment(\.editMode, $editMode)
             .onChange(of: editMode) { _, mode in
-                if mode == .inactive { bulkSelected.removeAll(); sharing = false }
+                if mode == .inactive { bulkSelected.removeAll() }
             }
             .disabled(model.isBusy)
-            .environment(\.editMode, $editMode)
-            // Keep the scroll geometry and Glass hosts stable across editing changes.
-            .contentMargins(.bottom, bottomActionsHeight, for: .scrollContent)
+            .contentMargins(.bottom, workBannerHeight + editingActionsHeight, for: .scrollContent)
             .overlay(alignment: .bottom) {
                 VStack(spacing: 0) {
                     Group {
@@ -180,40 +261,40 @@ struct LibraryView: View {
                             }
                             .disabled(links.isEmpty)
                             .buttonStyle(.glassProminent).controlSize(.large).padding(12)
-                        } else { packEditingActions }
+                        } else { packEditingActions(compact: wideLayout) }
                     }
-                        .opacity(editMode == .active ? 1 : 0)
-                        .offset(y: editMode == .active || reduceMotion ? 0 : 16)
-                        .allowsHitTesting(editMode == .active)
-                        .accessibilityHidden(editMode != .active)
+                    .frame(height: 68)
+                    .opacity(editMode.isEditing ? 1 : 0)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: editMode.isEditing)
+
+                    .allowsHitTesting(editMode.isEditing)
+                    .accessibilityHidden(!editMode.isEditing)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { editingActionsHeight = $0 }
                     CurrentWorkBanner()
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { workBannerHeight = $0 }
                 }
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bottomActionsHeight = $0 }
             }
-            .navigationTitle("내 스티커 팩")
+            .navigationTitle(wideLayout ? "" : "내 스티커 팩")
             .toolbar {
-                ToolbarItem(id: "libraryEdit", placement: .topBarLeading) {
-                    Button { toggleSelection(sharing: editMode == .active ? sharing : false) } label: {
-                        Text(editMode == .active ? "완료" : "편집")
-                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                    }
-                    .accessibilityIdentifier("editPacks")
-                }
-                if editMode == .active {
-                    ToolbarSpacer(.fixed, placement: .topBarLeading)
-                    ToolbarItem(id: "librarySelectAll", placement: .topBarLeading) {
-                        Button {
-                            let all = Set(model.packs.map(\.id))
-                            bulkSelected = bulkSelected == all ? [] : all
+                SelectionControls(id: "librarySelection", active: editMode == .active, title: "편집",
+                                      toggle: { toggleSelection(sharing: editMode == .active ? sharing : false) })
+                if wideLayout {
+                    ToolbarItem(id: "libraryActions", placement: .topBarTrailing) {
+                        Menu {
+                            Button("팩 공유", systemImage: "square.and.arrow.up") { toggleSelection(sharing: true) }
+                                .disabled(model.packs.isEmpty || model.isBusy)
+                            Button("팩 추가", systemImage: "plus", action: addPack)
+                                .disabled(!model.isAvailable || model.isBusy)
                         } label: {
-                            Text(bulkSelected == Set(model.packs.map(\.id)) && !model.packs.isEmpty ? "전체 해제" : "전체 선택")
-                                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                            Label("팩 메뉴", systemImage: "ellipsis")
                         }
-                        .disabled(model.packs.isEmpty).accessibilityIdentifier("selectAllPacks")
+                        .labelStyle(.iconOnly)
+                        .accessibilityLabel("팩 메뉴")
                     }
-                }
+                } else {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { toggleSelection(sharing: true) } label: { Image(systemName: "square.and.arrow.up") }
+                    Button { toggleSelection(sharing: true) } label: { Label("공유할 팩 선택", systemImage: "square.and.arrow.up") }
+                        .labelStyle(.iconOnly)
                         .accessibilityLabel("공유할 팩 선택").accessibilityIdentifier("selectPacksToShare")
                         .disabled(model.packs.isEmpty || model.isBusy)
                 }
@@ -231,22 +312,38 @@ struct LibraryView: View {
                     .disabled(!model.isAvailable || model.isBusy)
                 }
             }
+            }
             .overlay { if model.isBusy { ProgressView("저장 중") } }
             .refreshable { await model.refresh() }
-        } detail: {
-            if let pack = model.packs.first(where: { $0.id == selected }) {
-                InstalledPackView(pack: pack, stickers: model.stickers(in: pack), update: {
-                    importRequest = PackImportRequest(name: pack.telegramName, updating: true, title: pack.title)
-                }, retry: {
-                    importRequest = PackImportRequest(name: pack.telegramName, updating: false)
-                }, optimize: { ids in
-                    optimizationRequest = OptimizationRequest(packIDs: [pack.id], stickerIDs: ids.isEmpty ? nil : ids)
-                }) {
-                    await model.delete(ids: [pack.id])
+            .navigationSplitViewColumnWidth(min: sidebarMinimum, ideal: sidebarMinimum, max: sidebarMaximum)
+            .overlay(alignment: .trailing) {
+                if wideLayout {
+                    Rectangle().fill(Color(uiColor: .separator))
+                        .frame(width: 1 / max(1, displayScale))
+                        .ignoresSafeArea(edges: .vertical)
+                        .allowsHitTesting(false)
                 }
-                .id(pack.revision)
+            }
+        } detail: {
+            detailContent()
+        }
+        .background {
+            LibraryRotationObserver {
+                columnVisibility = .all
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .environment(\.horizontalSizeClass, wideLayout ? .regular : systemSizeClass)
+        .onChange(of: model.packs.map(\.id)) { _, ids in
+            if let selected, !ids.contains(selected) { self.selected = nil }
+            bulkSelected.formIntersection(ids)
+        }
+        .onChange(of: wideLayout, initial: true) { _, wide in
+            if wide {
+                columnVisibility = .all
             } else {
-                ContentUnavailableView("스티커 팩을 선택하세요", systemImage: "square.grid.2x2")
+                compactColumn = selected == nil ? .sidebar : .detail
+                columnVisibility = .automatic
             }
         }
         .onChange(of: PackLinkInbox.shared.received?.id) { _, received in if received == nil { Task { await model.refresh() } } }
@@ -257,7 +354,6 @@ struct LibraryView: View {
         .sheet(item: $optimizationRequest, onDismiss: { Task { await model.refresh() } }) { request in
             OptimizationView(request: request)
         }
-        .onDisappear { resetSelection() }
         .onChange(of: activeTab) { _, tab in
             if tab != .library { resetSelection() }
         }
@@ -276,12 +372,35 @@ struct LibraryView: View {
             if phase == .active { Task { await model.refresh() } }
         }
     }
+    }
+    @ViewBuilder
+    private func detailContent() -> some View {
+            Group {
+            if let pack = model.packs.first(where: { $0.id == selected }) {
+                InstalledPackView(pack: pack, stickers: model.stickers(in: pack), update: {
+                    importRequest = PackImportRequest(name: pack.telegramName, updating: true, title: pack.title)
+                }, retry: {
+                    importRequest = PackImportRequest(name: pack.telegramName, updating: false)
+                }, optimize: { ids in
+                    optimizationRequest = OptimizationRequest(packIDs: [pack.id], stickerIDs: ids.isEmpty ? nil : ids)
+                }) {
+                    await model.delete(ids: [pack.id])
+                }
+            } else {
+                ContentUnavailableView("스티커 팩을 선택하세요", systemImage: "square.grid.2x2")
+
+            }
+            }
+
+    }
+
     private func resetSelection() {
         editMode = .inactive
         sharing = false
         bulkSelected.removeAll()
         confirmBulkDelete = false
         deletingPack = nil
+        draggingPack = nil
     }
 
 }
