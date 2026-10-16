@@ -19,6 +19,7 @@ struct DownloadLogsView: View {
                         } label: {
                             HStack {
                                 Image(systemName: selection.contains(operation.id) ? "checkmark.circle.fill" : "circle")
+
                                 row(operation)
                             }
                         }.buttonStyle(.plain)

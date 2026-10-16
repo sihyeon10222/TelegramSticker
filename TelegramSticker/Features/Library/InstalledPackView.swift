@@ -95,6 +95,7 @@ struct InstalledPackView: View {
                             .overlay(alignment: .topTrailing) {
                                 if selecting {
                                     Image(systemName: selectedStickers.contains(sticker.id) ? "checkmark.circle.fill" : "circle")
+
                                         .foregroundStyle(Color.accentColor).padding(3).background(.background, in: Circle())
                                 }
                             }
@@ -168,14 +169,8 @@ struct InstalledPackView: View {
                     LandscapePackTitle(title: pack.title)
                         .accessibilityAddTraits(.isHeader)
                 }
-                ToolbarItem(id: "stickerSelection.toggle", placement: .topBarLeading) {
-                    selectionButton
-                        .background(PackTitleBoundary(leading: true))
-                }
-                .sharedBackgroundVisibility(.hidden)
-            } else {
-                SelectionControls(id: "stickerSelection", active: selecting, title: "선택", toggle: toggleSelection)
             }
+            SelectionControls(id: "stickerSelection", active: selecting, title: "선택", toggle: toggleSelection)
             ToolbarItem(id: "stickerShare", placement: .topBarTrailing) {
                 PackLinkShareButton(text: PackLinkList.links(for: [pack]).joined(separator: "\n"), disabled: selecting)
                 .background {
@@ -239,11 +234,6 @@ struct InstalledPackView: View {
         }
     }
 
-    private var selectionButton: some View {
-        SelectionToggleButton(active: selecting, title: "선택", action: toggleSelection)
-            .accessibilityIdentifier("selectionToggle")
-    }
-
     private var packOptions: some View {
         Menu {
                     if pack.telegramName != nil {
@@ -251,8 +241,11 @@ struct InstalledPackView: View {
                             .disabled(selecting || ImportActivity.shared.count > 0)
                             .accessibilityIdentifier("updatePack")
                     }
-                    Button(selecting ? "선택한 \(selectedStickers.count)개 용량 최적화" : "용량 최적화", systemImage: "slider.horizontal.3") {
+                    Button {
                         optimize(selecting ? selectedStickers : [])
+                    } label: {
+                        let title = selecting ? "선택한 \(selectedStickers.count)개 용량 최적화" : "용량 최적화"
+                        Label(title, systemImage: "slider.horizontal.3")
                     }
                     .disabled(ImportActivity.shared.count > 0 || (selecting && selectedStickers.isEmpty))
                     .accessibilityIdentifier("optimizePack")

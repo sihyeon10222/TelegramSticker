@@ -222,8 +222,9 @@ struct ImportView: View {
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
                         Button { model.download() } label: {
-                            Text(updating ? (model.installed ? "업데이트 확인 완료" : "팩 업데이트 확인") : model.result.map { $0.failed > 0 ? "실패한 \($0.failed)개 다시 시도" : "설치 완료" }
-                                ?? (model.progress == nil ? "스티커 설치" : "다시 시도")).frame(maxWidth: .infinity)
+                            let title = updating ? (model.installed ? "업데이트 확인 완료" : "팩 업데이트 확인") : model.result.map { $0.failed > 0 ? "실패한 \($0.failed)개 다시 시도" : "설치 완료" }
+                                ?? (model.progress == nil ? "스티커 설치" : "다시 시도")
+                            Text(title).frame(maxWidth: .infinity)
                         }
                             .buttonStyle(.glassProminent).controlSize(.large)
                             .disabled(model.busy || model.installed || ImportActivity.shared.count > 0 || (!updating && pack.installableStickers.isEmpty))

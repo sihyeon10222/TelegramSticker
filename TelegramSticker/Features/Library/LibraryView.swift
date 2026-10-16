@@ -19,6 +19,9 @@ struct LibraryView: View {
     @State private var sharing = false
     @State private var sharingPack: PackManifestV1?
     @State private var deletingPack: PackManifestV1?
+    @State private var sidebarCenterX: CGFloat = 0
+    @State private var sidebarScrolledUnderToolbar = false
+    @State private var packRowCenterX: CGFloat?
     @State private var editingActionsHeight: CGFloat = 0
     @State private var workBannerHeight: CGFloat = 0
     @State private var draggingPack: String?
@@ -26,59 +29,42 @@ struct LibraryView: View {
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // Navigation selection and edit selection have different lifetimes. Completing
-    // editing must not clear the currently displayed pack's sidebar highlight.
-    private func listSelection(preservingDetail: Bool) -> Binding<Set<String>> {
-        // A List can deliver its final deselection after EditMode has changed.
-        // Route that callback using the mode of the binding it received, rather
-        // than re-reading the new mode and clearing navigation by mistake.
-        let editing = editMode.isEditing
-        return Binding(get: {
-            editing ? bulkSelected : Set(selected.map { [$0] } ?? [])
-        }, set: { ids in
-            // Also handle a two-finger selection gesture that has just entered
-            // editing while List still holds its previous navigation binding.
-            if editing || editMode.isEditing { bulkSelected = ids }
-            else if let id = ids.first { selected = id }
-            else if !preservingDetail { selected = nil }
+    // Keep bulk selection independent of detail navigation so entering edit
+    // mode cannot replace the packs preselected by the share action.
+    private var listSelection: Binding<Set<String>> {
+        Binding(get: { bulkSelected }, set: { ids in
+            bulkSelected = ids
+            if !editMode.isEditing && !ids.isEmpty {
+                sharing = false
+                editMode = .active
+            }
         })
     }
 
     @ViewBuilder
-    private func packNavigationRow(_ pack: PackManifestV1, wideLayout: Bool) -> some View {
-        if wideLayout {
-            // Keep the same row alive through editing so its selection gutter
-            // slides in with the content instead of replacing the entire cell.
+    private func packNavigationRow(_ pack: PackManifestV1) -> some View {
+        if editMode.isEditing {
+            packRow(pack)
+        } else {
             Button {
-                if editMode.isEditing {
-                    if bulkSelected.contains(pack.id) { bulkSelected.remove(pack.id) }
-                    else { bulkSelected.insert(pack.id) }
-                } else {
-                    selected = pack.id
-                }
+                selected = pack.id
+                compactColumn = .detail
             } label: {
-                HStack(spacing: 0) {
-                    Image(systemName: bulkSelected.contains(pack.id) ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 22))
-                        .foregroundStyle(bulkSelected.contains(pack.id) ? Color.accentColor : Color(uiColor: .tertiaryLabel))
-                        .frame(width: 24)
-                        .offset(x: editMode.isEditing || reduceMotion ? 0 : -24)
-                        .opacity(editMode.isEditing ? 1 : 0)
-                        .frame(width: editMode.isEditing ? 24 : 0)
-                        .clipped()
-                        .padding(.trailing, editMode.isEditing ? 16 : 0)
-                        .accessibilityHidden(true)
-                    packRow(pack)
-                }
-                .contentShape(Rectangle())
-                .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: editMode.isEditing)
+                packRow(pack)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityAddTraits((editMode.isEditing ? bulkSelected.contains(pack.id) : selected == pack.id) ? .isSelected : [])
-        } else {
-            NavigationLink(value: pack.id) { packRow(pack) }
-                .navigationLinkIndicatorVisibility(.hidden)
         }
+    }
+
+    // Split-view columns can resolve semantic backgrounds at an elevated level.
+    // Resolve both orientations at the base level while retaining dark mode.
+    private func listColor(_ color: UIColor) -> Color {
+        Color(uiColor: UIColor { traits in
+            color.resolvedColor(with: UITraitCollection(traitsFrom: [
+                traits, UITraitCollection(userInterfaceLevel: .base)
+            ]))
+        })
     }
 
     private func packRow(_ pack: PackManifestV1) -> some View {
@@ -190,8 +176,8 @@ struct LibraryView: View {
     private func actionLabel(_ title: String, icon: String) -> some View {
         Label(title, systemImage: icon)
             .labelStyle(.iconOnly)
-            .font(.system(size: 16, weight: .medium))
-            .frame(width: 24, height: 24)
+            .font(.system(size: 18, weight: .medium))
+            .frame(width: 30, height: 30)
             .contentShape(Capsule())
     }
 
@@ -204,10 +190,11 @@ struct LibraryView: View {
     var body: some View {
         GeometryReader { geometry in
         let wideLayout = geometry.size.width >= 600 && (UIDevice.current.userInterfaceIdiom == .pad || geometry.size.width > geometry.size.height)
+        let phoneLandscapeSidebar = wideLayout && UIDevice.current.userInterfaceIdiom == .phone
         let sidebarMaximum = geometry.size.width / 3
         let sidebarMinimum = min(300, sidebarMaximum)
         NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: $compactColumn) {
-            List(selection: listSelection(preservingDetail: wideLayout)) {
+            List(selection: listSelection) {
                 if let message = model.message {
                     Section { Text(message).foregroundStyle(.secondary).accessibilityIdentifier("libraryMessage") }
                 }
@@ -230,7 +217,10 @@ struct LibraryView: View {
                 }
                 Section {
                     ForEach(model.packs) { pack in
-                        packNavigationRow(pack, wideLayout: wideLayout)
+                        packNavigationRow(pack)
+                                .onGeometryChange(for: CGFloat.self) {
+                                    $0.frame(in: .named("libraryList")).midX
+                                } action: { packRowCenterX = $0 }
                                 .contentShape(Rectangle())
                                 .onDrag {
                                     guard editMode.isEditing, !model.isBusy, model.damagedPacks.isEmpty,
@@ -239,7 +229,7 @@ struct LibraryView: View {
                                     return NSItemProvider(object: pack.id as NSString)
                                 }
                         .tag(pack.id)
-                        .listRowInsets(EdgeInsets(top: wideLayout ? 20 : 16, leading: wideLayout ? 20 : 16, bottom: wideLayout ? 20 : 16, trailing: wideLayout ? 10 : 16))
+                        .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
                         .onDrop(of: [.text], isTargeted: nil) { providers in
                             guard editMode.isEditing, !model.isBusy, ImportActivity.shared.count == 0,
                                   model.damagedPacks.isEmpty,
@@ -273,14 +263,30 @@ struct LibraryView: View {
                     }
 
                 }
-                .listRowBackground(wideLayout ? Color.clear : nil)
-                .listSectionMargins(.leading, wideLayout ? 0 : 20)
-                .listSectionMargins(.trailing, wideLayout ? 0 : 20)
+                .listRowBackground(listColor(.secondarySystemGroupedBackground))
+                // UIKit clips the section background at the landscape notch
+                // while applying its safe-area inset only to row content.
+                // Keep the section's rounded edge inside that clipping boundary.
+                .listSectionMargins(.leading, max(20, wideLayout ? geometry.safeAreaInsets.leading : 0))
+                .listSectionMargins(.trailing, phoneLandscapeSidebar ? 8 : 20)
             }
-            .modifier(LibraryListStyle(wideLayout: wideLayout))
-            .scrollContentBackground(wideLayout ? .hidden : .automatic)
-            .background(wideLayout ? Color(uiColor: .systemBackground) : Color.clear)
-            .environment(\.editMode, wideLayout ? .constant(.inactive) : $editMode)
+            .listStyle(.insetGrouped)
+            // Keep the hard edge clear at rest and during top overscroll.
+            // Normalize by the inset so the threshold survives rotation.
+            .scrollEdgeEffectStyle(wideLayout ? .hard : .automatic, for: .top)
+            .scrollEdgeEffectHidden(wideLayout && !sidebarScrolledUnderToolbar, for: .top)
+            .onScrollGeometryChange(for: Bool.self) { scroll in
+                scroll.contentOffset.y + scroll.contentInsets.top > 0.5
+            } action: { _, scrolled in
+                sidebarScrolledUnderToolbar = scrolled
+            }
+            .onGeometryChange(for: CGFloat.self) {
+                $0.frame(in: .named("libraryList")).midX
+            } action: { sidebarCenterX = $0 }
+            .contentMargins(.top, wideLayout ? 8 : nil, for: .scrollContent)
+            .scrollContentBackground(.hidden)
+            .background(listColor(.systemGroupedBackground))
+            .environment(\.editMode, $editMode)
             .onChange(of: editMode) { _, mode in
                 if mode == .inactive { bulkSelected.removeAll() }
             }
@@ -299,6 +305,8 @@ struct LibraryView: View {
                         } else { packEditingActions() }
                     }
                     .frame(height: 68)
+                    .frame(maxWidth: .infinity)
+                    .offset(x: (packRowCenterX ?? sidebarCenterX) - sidebarCenterX)
                     .opacity(editMode.isEditing ? 1 : 0)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: editMode.isEditing)
 
@@ -309,7 +317,9 @@ struct LibraryView: View {
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { workBannerHeight = $0 }
                 }
             }
+            .coordinateSpace(name: "libraryList")
             .navigationTitle(wideLayout ? "" : "내 스티커 팩")
+            .navigationBarTitleDisplayMode(wideLayout ? .inline : .large)
             .toolbar {
                 SelectionControls(id: "librarySelection", active: editMode == .active, title: "편집",
                                       toggle: {
@@ -417,6 +427,7 @@ struct LibraryView: View {
                 }
             } else {
                 ContentUnavailableView("스티커 팩을 선택하세요", systemImage: "square.grid.2x2")
+                    .navigationBarTitleDisplayMode(.inline)
 
             }
             }
@@ -432,14 +443,4 @@ struct LibraryView: View {
         draggingPack = nil
     }
 
-}
-
-private struct LibraryListStyle: ViewModifier {
-    let wideLayout: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if wideLayout { content.listStyle(.plain) }
-        else { content.listStyle(.insetGrouped) }
-    }
 }

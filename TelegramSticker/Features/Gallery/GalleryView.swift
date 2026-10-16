@@ -102,6 +102,7 @@ struct GalleryView: View {
                             selected.removeAll()
                         } label: {
                             Label("선택한 \(selected.count)개 팩 설치", systemImage: "arrow.down.circle")
+
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glassProminent).controlSize(.large)
@@ -183,6 +184,7 @@ private struct GalleryPackCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: installed ? "checkmark.seal.fill" : selected ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(installed ? Color.green : selected ? Color.accentColor : Color.secondary)
+
                 }
                 if installed {
                     Text("설치됨").font(.caption).foregroundStyle(.secondary)

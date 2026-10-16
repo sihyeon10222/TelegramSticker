@@ -272,3 +272,41 @@ Worker 타입 검사·배포 없는 번들 검사 완료. 테스트 실행·Work
 2026-10-16 선택·공유·알림 개선: `StickerDragSelection.swift`를 Features/Library에서 앱 공통 `UI/`로 옮겨 상세와 갤러리가 함께 사용한다. 갤러리는 미설치 팩의 드래그 범위 선택·전체 선택/선택 해제를 제공한다. `App/TabReselectionObserver.swift`는 시스템 탭 delegate를 전달하면서 내 스티커 팩 재선택을 홈 이동 이벤트로 연결한다. 하단 작업 버튼 규격과 행 상하 여백을 통일하고 넓은 사이드바도 공유·추가 툴바 그룹을 사용한다. `UI/PackLinkSharing.swift`는 실제 상세 공유 버튼에 iPad popover를 고정하고 목록 스와이프는 링크 텍스트 공유를 바로 연다. 최적화 완료 알림에는 세션·품질 목적지를 넣고 앱에서 준비 결과 및 revision 유효성을 확인한 뒤 비교·적용 화면을 연다. 기존 모달이 닫힐 때까지 대기하며 만료 결과는 재준비를 안내한다. 파일은 앱 동기화 그룹에만 포함되고 키보드·백엔드·저장 경로 변경은 없다. 테스트는 요청 없이는 실행하지 않는다.
 
 2026-10-17 알림 종료 수정: WorkNotifications는 async delegate bridge 대신 명시적인 completion handler delegate를 사용하고, 알림 응답 및 foreground 표시의 완료 콜백을 MainActor에서 호출한다. iPad 종료 로그의 UIKit snapshot/state restoration 메인 스레드 assertion을 해결하기 위한 변경이다. 상세 공유 버튼은 기존 기본 전경색을 사용한다. 넓은 사이드바의 설치된 팩 제목은 고정 Section header 대신 일반 목록 행으로 배치해 스크롤과 함께 사라진다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로는 유지한다.
+
+2026-10-17 목록 외형 통일: LibraryView는 세로 목록과 넓은 사이드바 모두 insetGrouped 스타일, 좌우 섹션 여백 20pt, 행 내부 사방 16pt를 사용한다. 넓은 화면의 plain/투명 행 배경과 LibraryListStyle modifier를 제거해 시스템 그룹 배경과 둥근 섹션 모서리를 공통 사용한다. 사이드바 선택 원의 이동 애니메이션과 상태는 유지한다. 기존 파일 내부 수정으로 타깃·리소스·저장 경로 변경은 없다.
+
+2026-10-17 사이드바 색상·선택 수정: 목록/사이드바 모두 base userInterfaceLevel의 systemGroupedBackground와 secondarySystemGroupedBackground를 명시해 밝은 모드에서 회색 바탕·흰색 목록을 유지한다. 다크 모드는 시스템 의미 색상을 유지한다. 가로 전용 수동 선택 버튼과 강제 inactive EditMode를 제거하고 양쪽 모두 NavigationLink 및 List(selection:)/EditMode 바인딩으로 시스템 선택 원 애니메이션과 두 손가락 다중 선택을 사용한다. 앞선 가로 수동 선택·모션 설명을 대체하며 파일·타깃·저장 경로 변경은 없다.
+
+2026-10-17 iPhone 가로 목록 모서리 수정: 넓은 사이드바의 Section leading margin에 실제 화면 leading safe-area inset을 더해 노치 안전 영역이 섹션의 왼쪽 둥근 모서리를 잘라내지 않도록 한다. 기본 20pt 여백, 시스템 선택·행 내부 여백·색상은 유지한다. 기존 파일 내부 변경이며 타깃·저장 경로 변경은 없다.
+
+2026-10-17 사이드바 열기 선택 버튼 점 수정: SelectionToggleButton의 GlassEffectContainer와 glassEffectID를 제거해 내비게이션 열 이동 중 글래스가 작은 점으로 morph되는 경로를 없앤다. 버튼 자체의 interactive glassEffect와 선택/완료의 크기·색상 전환은 유지한다. 기존 파일 내부 수정으로 타깃·저장 경로 변경은 없다.
+
+2026-10-17 사이드바 간격·툴바 후속: Section leading은 max(20pt, 실제 leading safe-area inset)으로 지정해 안전 영역에 기본 여백을 중복 추가하지 않는다. 넓은 사이드바의 scrollContent 상단 여백은 8pt로 줄인다. SelectionToggleButton의 직접 glassEffect·고정 frame·opacity 중첩 라벨·로컬 애니메이션과 두 호출부의 sharedBackgroundVisibility(.hidden)을 제거하고 시스템 Button/툴바 chrome으로 전환한다. 완료는 시스템 borderedProminent 체크 버튼이다. 앞선 글래스 ID만 제거하는 수정 설명을 대체하며 기존 파일 내부 변경이다.
+
+2026-10-17 사이드바 재열기 버튼 블러 후속: InstalledPackView의 leading 툴바에 시스템 fixed ToolbarSpacer를 두어 열 사이를 이동하는 기본 sidebarToggle과 선택 버튼의 글래스 그룹을 분리한다. 선택 버튼은 기존 시스템 Button을 유지하고 UIKit 토글 이동·열 전환은 변경하지 않는다. 기존 파일 내부 변경이다.
+
+2026-10-17 목록 공유 전체 선택 안정화: LibraryView의 편집·공유 선택은 모든 방향과 사이드바에서 행 버튼과 bulkSelected로 직접 관리한다. 시스템 List 선택 바인딩은 일반 탐색에서만 사용하며 편집 중 늦게 도착한 탐색 선택 콜백은 무시한다. 공유 진입 시 전체 팩 선택이 시스템 목록의 편집 전환에 의해 덮어써지지 않게 한다. 파일·타깃·리소스·저장 경로 변경은 없다.
+
+2026-10-17 선택 버튼 재열기 블러 원인 분리: InstalledPackView에서 가로 선택 버튼에 붙이던 PackTitleBoundary UIKit background와 불필요한 fixed ToolbarSpacer를 제거한다. 방향에 관계없이 동일한 SelectionControls ToolbarContent를 유지한다. LandscapePackTitle은 선택 버튼에 측정 뷰를 삽입하지 않고 실제 시스템 버튼의 접근성 ID/라벨과 경계를 읽으며 공유 쪽 경계와 함께 제목 영역을 계산한다. 앞선 그룹 분리 수정 설명을 대체하며 기존 파일 내부 변경이다.
+
+2026-10-17 목록 선택 원 모션 복구: LibraryView는 탐색·편집 사이에서 동일한 행 Button과 HStack을 유지하며 선택 원의 폭·위치·투명도를 애니메이션한다. 일반 탭은 selected 및 compactColumn으로 상세를 열고 편집 탭은 기존 bulkSelected를 갱신한다. 동작 줄이기 설정을 존중하며 공유 전체 선택 유지와 기존 파일·타깃·저장 경로는 보존한다.
+
+2026-10-17 선택 상태 흐림 전환: 공통 SelectionToggleButton은 편집/선택과 완료 버튼을 안정적인 ZStack 안에서 Apple SwiftUI blurReplace transition으로 교체한다. 애니메이션은 active 변경에만 연결하며 Reduce Motion에서는 애니메이션을 생략한다. 직접 glassEffect·UIKit 측정 뷰는 추가하지 않는다. 기존 파일 내부 수정이다.
+
+2026-10-17 사이드바 편집 작업 정렬: LibraryView는 목록 행의 실제 수평 중심을 목록 좌표계에서 측정하고 하단 편집·공유 작업을 같은 중심에 배치한다. 비대칭 안전 영역과 섹션 여백을 반영하며 작업 배너와 파일·타깃·저장 경로는 유지한다.
+
+2026-10-17 iPhone 가로 목록 폭 조정: LibraryView의 휴대폰 가로 사이드바에서만 설치된 팩 섹션의 trailing 여백을 20pt에서 시스템 툴바 끝 여백에 맞춘 8pt로 줄인다. 목록을 오른쪽으로 확장하고 하단 작업은 기존 실제 행 중심 측정으로 함께 정렬한다. 기존 파일 내부 변경이다.
+
+2026-10-17 가로 사이드바 상단 블러 복구: LibraryView의 iPhone 가로 목록 상단에 시스템 hard scroll-edge 효과를 명시한다. 하단 작업 정렬의 전체 높이 GeometryReader overlay를 제거하고 목록과 행의 중심을 onGeometryChange로 측정해 하단 영역만 overlay한다. 넓힌 목록 폭과 작업 중앙 정렬은 유지하며 기존 파일 내부 변경이다.
+
+2026-10-17 상태 버튼 전환 공통화: `UI/ButtonLabelTransition.swift`는 Apple blurReplace 전환을 버튼 내부 라벨에 적용하는 공통 modifier와 문자열 버튼을 제공한다. SelectionToggleButton은 하나의 Button을 유지하고 confirm role·라벨만 상태에 따라 갱신한다. 갤러리 전체 선택/해제·설치 개수·선택 아이콘, 로그 복사됨·선택 아이콘, 가져오기 설치/업데이트 결과, 최적화 닫기/적용 개수와 상세 선택 아이콘에도 공통 라벨 전환을 사용한다. 앱 동기화 그룹에 자동 포함되며 키보드·서버 타깃과 저장 경로 변경은 없다.
+
+2026-10-17 상단 블러 자동 전환 복원: LibraryView의 hard scroll-edge 및 hidden(false) 강제 지정을 제거한다. 상단 효과는 목록 스크롤 위치에 따른 시스템 기본 전환에 맡기며 목록 폭·하단 정렬 및 전체 높이 overlay 제거는 유지한다. 기존 파일 내부 변경이다.
+
+2026-10-17 공통 흐림 전환 철회: 버튼 표시 문제로 UI/ButtonLabelTransition.swift와 모든 호출을 제거하고 일반 시스템 Button 라벨로 복구했다. SelectionToggleButton은 원래의 기본 편집/선택 버튼과 파란 borderedProminent 완료 체크 버튼으로 복원했다. 앞선 공통 흐림 전환 설명을 대체한다. 앱 동기화 그룹의 파일 삭제이며 키보드·저장 경로 변경은 없다.
+
+2026-10-17 선택 버튼 형태 전환 수정: SelectionToggleButton은 단일 plain Button과 Apple GlassEffectContainer/glassEffectID를 사용한다. 동일한 capsule 글래스의 높이를 44pt로 유지하고 폭을 64pt에서 44pt로 애니메이션해 편집/선택 타원과 완료 원형 사이를 전환한다. 파란 tint는 완료에만 적용하고 내부 라벨에는 blurReplace를 사용한다. SelectionControls의 시스템 공유 배경은 숨겨 글래스 중첩을 막는다. 기존 파일 내부 변경이며 타깃·리소스·저장 경로 변경은 없다.
+
+2026-10-17 선택 버튼 높이 보정: SelectionToggleButton의 높이와 완료 원형 지름을 44pt로 맞추고 fixedSize로 툴바 내부 수직 압축을 방지한다. 기존 타원↔원형 글래스 전환은 유지한다. 기존 파일 내부 변경이다.
+
+2026-10-17 목록 두 손가락 선택 복구: LibraryView의 수동 선택 원·편집 행 버튼을 제거하고 List(selection:)와 실제 EditMode 바인딩으로 시스템 다중 선택을 사용한다. bulkSelected는 상세 탐색 selected와 분리된 안정적인 바인딩으로 유지해 공유 진입 시 전체 선택을 보존한다. 시스템 제스처로 선택이 시작되면 편집 작업을 표시한다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다.

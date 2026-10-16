@@ -1,9 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Give each action its own navigation-bar item. The bar owns sizing, glass,
-/// and insertion transitions; a resizing custom-view HStack cannot coordinate
-/// those transitions with the navigation bar's UIKit layout.
+/// Keep the selection control in its own navigation-bar item.
 struct SelectionControls: ToolbarContent {
     let id: String
     let active: Bool
@@ -25,30 +23,41 @@ struct SelectionControls: ToolbarContent {
 }
 
 struct SelectionToggleButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let active: Bool
     let title: String
     let action: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var glassNamespace
 
     var body: some View {
         GlassEffectContainer {
-            Button(action: action) {
+            Button(action: toggle) {
                 ZStack {
-                    Text(title).opacity(active ? 0 : 1)
-                    Image(systemName: "checkmark").fontWeight(.semibold).opacity(active ? 1 : 0)
+                    if active {
+                        Image(systemName: "checkmark")
+                            .font(.body.weight(.semibold))
+                            .transition(.blurReplace)
+                    } else {
+                        Text(title)
+                            .font(.body)
+                            .transition(.blurReplace)
+                    }
                 }
-                .font(.body)
+                .frame(width: active ? 44 : 64, height: 44)
                 .foregroundStyle(active ? Color.white : Color.primary)
-                .frame(width: active ? 44 : 56, height: 44)
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .glassEffect(.regular.tint(active ? .blue : .clear).interactive(), in: Capsule())
-            .glassEffectID("selectionToggle", in: glassNamespace)
+            .fixedSize()
+            .glassEffect(active ? .regular.tint(.blue).interactive() : .regular.interactive(), in: .capsule)
+            .glassEffectID("selection", in: glassNamespace)
             .accessibilityLabel(active ? "완료" : title)
         }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: active)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: active)
+    }
+
+    private func toggle() {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3), action)
     }
 }

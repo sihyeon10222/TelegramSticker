@@ -137,6 +137,17 @@ struct LandscapePackTitle: UIViewRepresentable {
             }
         }
 
+        private func selectionActions(in view: UIView) -> [UIView] {
+            view.subviews.flatMap { child -> [UIView] in
+                guard !child.isHidden, child.alpha > 0.01 else { return [] }
+                let identified = child.accessibilityIdentifier == "selectionToggle"
+                let labeled = (child is UIControl || child.accessibilityTraits.contains(.button))
+                    && (child.accessibilityLabel == "선택" || child.accessibilityLabel == "완료")
+                if identified || labeled { return [child] }
+                return selectionActions(in: child)
+            }
+        }
+
         fileprivate func alignTitle() {
             guard let window else { return }
             let host = convert(bounds, to: window)
@@ -144,8 +155,20 @@ struct LandscapePackTitle: UIViewRepresentable {
                 let frame = $0.convert($0.bounds, to: window)
                 return frame.width > 0 && abs(frame.midY - host.midY) < 44
             }
-            guard let leading = markers.first(where: { $0.leading }),
-                  let trailing = markers.first(where: { !$0.leading }) else {
+            guard let trailing = markers.first(where: { !$0.leading }) else {
+                showInHost()
+                return
+            }
+            let trailingBounds = trailing.convert(trailing.bounds, to: window)
+            // Read the native action instead of attaching a representable to
+            // its label, which turns the toolbar action into custom content.
+            guard let leading = selectionActions(in: window).filter({ view in
+                let frame = view.convert(view.bounds, to: window)
+                return frame.width > 0 && abs(frame.midY - host.midY) < 44
+                    && frame.maxX < trailingBounds.minX
+            }).max(by: {
+                $0.convert($0.bounds, to: window).maxX < $1.convert($1.bounds, to: window).maxX
+            }) else {
                 showInHost()
                 return
             }
