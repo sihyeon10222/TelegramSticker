@@ -247,3 +247,7 @@ Worker 타입 검사·배포 없는 번들 검사 완료. 테스트 실행·Work
 2026-10-16 상세 헤더 통합: 앞선 별도 principal 제목 설명을 대체한다. InstalledPackView는 선택·제목·공유/옵션을 하나의 고정 외부 폭 trailing ToolbarItem에 배치한다. 내부 HStack에서 제목이 버튼 사이 남은 폭을 사용해 중앙 정렬·말줄임하고, 선택 전환에 따른 내부 폭 변화를 동일 smooth transaction으로 애니메이션한다. 현재 GeometryReader 상세 열 너비에서 시스템 leading 버튼과 양끝 여백용 84pt를 제외한 폭을 사용한다. 열 너비가 바뀌면 툴바 chrome만 재생성해 UIKit이 이전 방향의 제목 폭을 유지하지 않게 한다. 그리드·선택 상태는 유지하며 제목은 측정 영역 밖으로 확장하지 않는다. 파일·타깃·저장 경로 변경은 없다.
 
 2026-10-16 상세 툴바 표시 복구: 단일 trailing packHeader와 상세 폭에서 84pt를 빼는 계산·너비 기반 id 재생성을 제거했다. InstalledPackView의 navigationTitle(pack.title)와 독립적인 leading 선택, trailing 공유·옵션 ToolbarItem을 복원했다. principal 커스텀 제목·영역 밖 좌표 보정은 사용하지 않고 시스템이 제목 크기·말줄임·회전 배치를 관리한다. packOptions는 기존 상세 기능을 유지하는 뷰 속성이다. 앞선 상세 헤더 통합 설명을 대체한다. 파일·타깃·리소스·저장 경로 변경은 없다.
+
+2026-10-16 제목 여백 정렬: InstalledPackView의 선택 버튼과 첫 trailing 공유 버튼에 실제 경계 측정 뷰를 부착한다. LibraryNavigationLayout의 PackCenteredTitle은 동일 좌표계에서 두 버튼 사이 폭을 계산해 좌우 8pt 간격과 중앙 정렬·한 줄 말줄임을 적용한다. 회전·선택 버튼 크기 전환 중에도 경계를 갱신한다. 파일·타깃·리소스·저장 경로 변경은 없다.
+
+2026-10-16 제목 표시 복구: PackCenteredTitle은 principal 호스트가 UINavigationBar의 자식이라는 가정을 제거하고 실제 양쪽 액션 marker의 공통 상위 뷰에서 제목을 배치한다. marker 갱신 시 참조를 다시 등록하며 측정 전에는 제목 호스트 내부 UILabel을 표시한다. 1pt 고유 폭 대신 최대 200pt의 정상 제목 폭을 제공해 이름이 완전히 숨겨지지 않도록 한다. 파일·타깃·리소스·저장 경로 변경은 없다. 요청에 따라 테스트·UI 검증 없이 실기기 빌드·덮어쓰기 설치·실행만 수행한다.
