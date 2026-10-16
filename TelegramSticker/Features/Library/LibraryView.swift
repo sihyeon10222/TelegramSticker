@@ -325,7 +325,7 @@ struct LibraryView: View {
                 }
             }
         } detail: {
-            detailContent()
+            detailContent(landscape: geometry.size.width > geometry.size.height)
         }
         .background {
             LibraryRotationObserver {
@@ -374,10 +374,10 @@ struct LibraryView: View {
     }
     }
     @ViewBuilder
-    private func detailContent() -> some View {
+    private func detailContent(landscape: Bool) -> some View {
             Group {
             if let pack = model.packs.first(where: { $0.id == selected }) {
-                InstalledPackView(pack: pack, stickers: model.stickers(in: pack), update: {
+                InstalledPackView(landscape: landscape, pack: pack, stickers: model.stickers(in: pack), update: {
                     importRequest = PackImportRequest(name: pack.telegramName, updating: true, title: pack.title)
                 }, retry: {
                     importRequest = PackImportRequest(name: pack.telegramName, updating: false)

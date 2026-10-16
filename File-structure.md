@@ -257,3 +257,11 @@ Worker 타입 검사·배포 없는 번들 검사 완료. 테스트 실행·Work
 2026-10-16 상세 헤더 레이아웃 교체: 앞선 UIKit 제목 overlay·버튼 탐색·CADisplayLink 배치를 모두 제거했다. InstalledPackView는 상세 시스템 navigationBar를 숨기고 ScrollView의 top safeAreaInset에 뒤로(컴팩트)·선택·제목·공유/옵션을 단일 SwiftUI HStack으로 배치한다. 버튼 그룹은 고유 폭을 유지하고 제목만 남은 폭을 사용하며 양쪽 8pt 간격·한 줄 말줄임·clipping을 적용한다. LibraryNavigationLayout은 다시 회전 관찰만 담당한다. 파일·타깃·리소스·저장 경로 변경은 없다. 테스트와 UI 검증 없이 실기기 빌드·덮어쓰기 설치·실행한다.
 
 2026-10-16 시스템 상세 툴바 복원: safeAreaInset의 packHeader와 수동 뒤로 버튼·공유/옵션 glass·고정 44pt 헤더를 제거했다. InstalledPackView는 원래 시스템 navigationBar와 SelectionControls, 독립 ShareLink/옵션 ToolbarItem을 사용한다. 제목만 principal의 한 줄 SwiftUI Text로 두고 시스템이 제안한 영역 안에서 중앙 정렬·끝 말줄임·clipping을 적용한다. 별도 좌표 보정·UIKit overlay·폭 제한은 없다. 앞선 별도 상세 헤더 설명을 대체한다. 파일·타깃·리소스·저장 경로 변경은 없으며 테스트·UI 검증 없이 실기기 빌드·덮어쓰기 설치·실행한다.
+
+2026-10-16 공유 버튼 눌림 중 제목 겹침 수정: InstalledPackView의 무한 최대 폭 principal Text를 제거하고 navigationTitle(pack.title)과 inline 표시만 사용한다. 시스템 내비게이션 바가 공유·옵션 버튼의 눌림 전환 중에도 제목의 가용 폭과 말줄임을 관리한다. 기존 독립 툴바 버튼과 선택 상태는 유지하며 파일·타깃·리소스·저장 경로 변경은 없다. 테스트 없이 실기기 빌드·덮어쓰기 설치·실행한다.
+
+2026-10-16 가로 상세 제목 정렬: LibraryView가 화면의 실제 가로 여부를 상세에 전달한다. 가로에서만 LibraryNavigationLayout의 LandscapePackTitle과 선택·공유 액션 경계 marker를 사용해 두 버튼 사이 영역 중앙에 한 줄 제목을 배치하고 해당 폭에서 말줄임한다. 사이드바 및 선택 버튼 전환 중에도 실제 경계를 반영한다. 세로는 기존 시스템 navigationTitle을 유지한다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다.
+
+2026-10-16 가로 팩별 제목 정렬 보정: 앞선 PackTitleBounds 약한 참조와 principal 내부 UILabel 배치를 대체한다. 가로 제목은 표시 중인 상세 UINavigationBar 안의 실제 marker를 찾아 버튼 사이 폭 전체를 쓰는 UILabel을 해당 bar에 배치한다. marker 참조 누락 시 시스템 제목 영역으로 정렬하던 fallback을 제거하고 가로 navigationTitle은 비워 중복 제목을 방지한다. 뷰 해제·세로 전환 시 label과 displayLink를 제거한다. 세로 및 다른 동작은 유지하며 기존 파일 내부 수정이다.
+
+2026-10-16 가로 제목 미표시 수정: LandscapePackTitle이 UIKit UINavigationBar를 반드시 찾도록 한 조건을 제거했다. 실제 선택·공유 marker 및 principal의 공통 상위 뷰를 제목 배치 컨테이너로 사용한다. 버튼들이 아직 부착되지 않은 동안은 principal 호스트 내부에 제목을 표시해 제목을 제거하는 경로를 없앤다. 세로·버튼·회전·저장 동작과 타깃 경계는 유지한다.

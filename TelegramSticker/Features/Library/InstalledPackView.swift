@@ -6,6 +6,7 @@ struct InstalledPackView: View {
     @Environment(\.activeAppTab) private var activeTab
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let landscape: Bool
     let pack: PackManifestV1
     let stickers: [Sticker]
     let update: () -> Void
@@ -159,23 +160,21 @@ struct InstalledPackView: View {
         .onChange(of: activeTab) { _, tab in
             if tab != .library { resetSelection() }
         }
-        .navigationTitle(pack.title)
+        .navigationTitle(landscape ? "" : pack.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text(pack.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .clipped()
-                    .accessibilityAddTraits(.isHeader)
-            }
-            SelectionControls(id: "stickerSelection", active: selecting, title: "선택") {
-                SelectionControls.update {
-                    selecting.toggle()
-                    selectedStickers.removeAll()
+            if landscape {
+                ToolbarItem(placement: .principal) {
+                    LandscapePackTitle(title: pack.title)
+                        .accessibilityAddTraits(.isHeader)
                 }
+                ToolbarItem(id: "stickerSelection.toggle", placement: .topBarLeading) {
+                    selectionButton
+                        .background(PackTitleBoundary(leading: true))
+                }
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                SelectionControls(id: "stickerSelection", active: selecting, title: "선택", toggle: toggleSelection)
             }
             ToolbarItem(id: "stickerShare", placement: .topBarTrailing) {
                 ShareLink(item: PackLinkList.links(for: [pack]).joined(separator: "\n")) {
@@ -184,6 +183,9 @@ struct InstalledPackView: View {
                 .disabled(selecting || PackLinkList.links(for: [pack]).isEmpty)
                 .labelStyle(.iconOnly)
                 .accessibilityIdentifier("sharePackLink")
+                .background {
+                    if landscape { PackTitleBoundary(leading: false) }
+                }
             }
             ToolbarItem(id: "stickerOptions", placement: .topBarTrailing) {
                 packOptions
@@ -233,6 +235,18 @@ struct InstalledPackView: View {
             guard !Task.isCancelled else { return }
             storageBytes = bytes
         }
+    }
+
+    private func toggleSelection() {
+        SelectionControls.update {
+            selecting.toggle()
+            selectedStickers.removeAll()
+        }
+    }
+
+    private var selectionButton: some View {
+        SelectionToggleButton(active: selecting, title: "선택", action: toggleSelection)
+            .accessibilityIdentifier("selectionToggle")
     }
 
     private var packOptions: some View {
