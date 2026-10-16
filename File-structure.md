@@ -251,3 +251,9 @@ Worker 타입 검사·배포 없는 번들 검사 완료. 테스트 실행·Work
 2026-10-16 제목 여백 정렬: InstalledPackView의 선택 버튼과 첫 trailing 공유 버튼에 실제 경계 측정 뷰를 부착한다. LibraryNavigationLayout의 PackCenteredTitle은 동일 좌표계에서 두 버튼 사이 폭을 계산해 좌우 8pt 간격과 중앙 정렬·한 줄 말줄임을 적용한다. 회전·선택 버튼 크기 전환 중에도 경계를 갱신한다. 파일·타깃·리소스·저장 경로 변경은 없다.
 
 2026-10-16 제목 표시 복구: PackCenteredTitle은 principal 호스트가 UINavigationBar의 자식이라는 가정을 제거하고 실제 양쪽 액션 marker의 공통 상위 뷰에서 제목을 배치한다. marker 갱신 시 참조를 다시 등록하며 측정 전에는 제목 호스트 내부 UILabel을 표시한다. 1pt 고유 폭 대신 최대 200pt의 정상 제목 폭을 제공해 이름이 완전히 숨겨지지 않도록 한다. 파일·타깃·리소스·저장 경로 변경은 없다. 요청에 따라 테스트·UI 검증 없이 실기기 빌드·덮어쓰기 설치·실행만 수행한다.
+
+2026-10-16 제목 가용 폭 수정: 앞선 marker·공통 상위 뷰·200pt fallback 방식을 제거했다. PackCenteredTitle은 현재 제목 위치에 해당하는 UINavigationBar를 찾고 공개 UIControl/버튼 접근성 특성을 가진 실제 액션의 경계로 제목 폭을 정한다. 제목 UILabel은 한 줄 끝 말줄임과 clipping을 적용하며 버튼 사이 좌우 8pt를 사용한다. 방향별 고정 최대 폭은 없다. 기존 파일 내부 수정으로 타깃·리소스·저장 경로 변경은 없다. 테스트 없이 실기기 빌드·설치·실행만 수행한다.
+
+2026-10-16 상세 헤더 레이아웃 교체: 앞선 UIKit 제목 overlay·버튼 탐색·CADisplayLink 배치를 모두 제거했다. InstalledPackView는 상세 시스템 navigationBar를 숨기고 ScrollView의 top safeAreaInset에 뒤로(컴팩트)·선택·제목·공유/옵션을 단일 SwiftUI HStack으로 배치한다. 버튼 그룹은 고유 폭을 유지하고 제목만 남은 폭을 사용하며 양쪽 8pt 간격·한 줄 말줄임·clipping을 적용한다. LibraryNavigationLayout은 다시 회전 관찰만 담당한다. 파일·타깃·리소스·저장 경로 변경은 없다. 테스트와 UI 검증 없이 실기기 빌드·덮어쓰기 설치·실행한다.
+
+2026-10-16 시스템 상세 툴바 복원: safeAreaInset의 packHeader와 수동 뒤로 버튼·공유/옵션 glass·고정 44pt 헤더를 제거했다. InstalledPackView는 원래 시스템 navigationBar와 SelectionControls, 독립 ShareLink/옵션 ToolbarItem을 사용한다. 제목만 principal의 한 줄 SwiftUI Text로 두고 시스템이 제안한 영역 안에서 중앙 정렬·끝 말줄임·clipping을 적용한다. 별도 좌표 보정·UIKit overlay·폭 제한은 없다. 앞선 별도 상세 헤더 설명을 대체한다. 파일·타깃·리소스·저장 경로 변경은 없으며 테스트·UI 검증 없이 실기기 빌드·덮어쓰기 설치·실행한다.

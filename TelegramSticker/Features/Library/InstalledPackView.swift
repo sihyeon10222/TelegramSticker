@@ -12,7 +12,6 @@ struct InstalledPackView: View {
     let retry: () -> Void
     let optimize: (Set<String>) -> Void
     let delete: () async -> Void
-    @State private var titleLayout = PackTitleLayout()
     @State private var images = StickerImages()
     @State private var status = "길게 눌러 복사하거나 공유할 수 있어요."
     @State private var copiedID: String?
@@ -160,23 +159,24 @@ struct InstalledPackView: View {
         .onChange(of: activeTab) { _, tab in
             if tab != .library { resetSelection() }
         }
-        .navigationTitle("")
+        .navigationTitle(pack.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                PackCenteredTitle(title: pack.title, layout: titleLayout)
+                Text(pack.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .clipped()
+                    .accessibilityAddTraits(.isHeader)
             }
-            ToolbarItem(id: "stickerSelection.toggle", placement: .topBarLeading) {
-                SelectionToggleButton(active: selecting, title: "선택") {
-                    SelectionControls.update {
-                        selecting.toggle()
-                        selectedStickers.removeAll()
-                    }
+            SelectionControls(id: "stickerSelection", active: selecting, title: "선택") {
+                SelectionControls.update {
+                    selecting.toggle()
+                    selectedStickers.removeAll()
                 }
-                .accessibilityIdentifier("selectionToggle")
-                .background(PackTitleBoundary(layout: titleLayout, leading: true))
             }
-            .sharedBackgroundVisibility(.hidden)
             ToolbarItem(id: "stickerShare", placement: .topBarTrailing) {
                 ShareLink(item: PackLinkList.links(for: [pack]).joined(separator: "\n")) {
                     Label("Sticker Pack 링크 공유", systemImage: "square.and.arrow.up")
@@ -184,7 +184,6 @@ struct InstalledPackView: View {
                 .disabled(selecting || PackLinkList.links(for: [pack]).isEmpty)
                 .labelStyle(.iconOnly)
                 .accessibilityIdentifier("sharePackLink")
-                .background(PackTitleBoundary(layout: titleLayout, leading: false))
             }
             ToolbarItem(id: "stickerOptions", placement: .topBarTrailing) {
                 packOptions
