@@ -83,7 +83,8 @@ struct GalleryView: View {
                             ended: { suppressTapUntil = Date().addingTimeInterval(0.35) })
                     }
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { _ in selectionGeneration += 1 }
-                }.padding(16).frame(maxWidth: 1040, alignment: .leading).frame(maxWidth: .infinity)
+                }.padding([.top, .horizontal], 16).padding(.bottom, 12)
+                    .frame(maxWidth: 1040, alignment: .leading).frame(maxWidth: .infinity)
             }
             .refreshable { if let client { await catalog.refresh(client: client, force: true) } }
             .navigationTitle("갤러리")
@@ -93,7 +94,8 @@ struct GalleryView: View {
                 }.disabled(selected.isEmpty && selectableIDs.isEmpty)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 8) {
+                VStack(spacing: 0) {
+                    if !selected.isEmpty {
                     Button {
                             guard ImportActivity.shared.count == 0, LibraryWriter.shared != nil else { return }
                             let links = catalog.packs.filter { selected.contains($0.id) && !installed.contains($0.id.lowercased()) }.map(\.link)
@@ -107,13 +109,11 @@ struct GalleryView: View {
                         }
                         .buttonStyle(.glassProminent).controlSize(.large)
                         .disabled(selected.isEmpty || ImportActivity.shared.count > 0 || LibraryWriter.shared == nil)
-                        .padding(.horizontal, 16).padding(.top, 8)
-                        .opacity(selected.isEmpty ? 0 : 1)
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: selected.isEmpty)
-                        .allowsHitTesting(!selected.isEmpty)
-                        .accessibilityHidden(selected.isEmpty)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                    }
                     CurrentWorkBanner()
                 }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: selected.isEmpty)
             }
             .sheet(item: $installation, onDismiss: { Task { await refreshInstalled() } }) { request in
                 if let writer = LibraryWriter.shared { ImportView(writer: writer, initialLinks: request.links) }

@@ -19,9 +19,7 @@ struct LibraryView: View {
     @State private var sharing = false
     @State private var sharingPack: PackManifestV1?
     @State private var deletingPack: PackManifestV1?
-    @State private var sidebarCenterX: CGFloat = 0
     @State private var sidebarScrolledUnderToolbar = false
-    @State private var packRowCenterX: CGFloat?
     @State private var editingActionsHeight: CGFloat = 0
     @State private var workBannerHeight: CGFloat = 0
     @State private var draggingPack: String?
@@ -41,20 +39,17 @@ struct LibraryView: View {
         })
     }
 
-    @ViewBuilder
     private func packNavigationRow(_ pack: PackManifestV1) -> some View {
-        if editMode.isEditing {
+        // Preserve row identity while List animates its native selection control.
+        Button {
+            guard !editMode.isEditing else { return }
+            selected = pack.id
+            compactColumn = .detail
+        } label: {
             packRow(pack)
-        } else {
-            Button {
-                selected = pack.id
-                compactColumn = .detail
-            } label: {
-                packRow(pack)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     // Split-view columns can resolve semantic backgrounds at an elevated level.
@@ -218,9 +213,6 @@ struct LibraryView: View {
                 Section {
                     ForEach(model.packs) { pack in
                         packNavigationRow(pack)
-                                .onGeometryChange(for: CGFloat.self) {
-                                    $0.frame(in: .named("libraryList")).midX
-                                } action: { packRowCenterX = $0 }
                                 .contentShape(Rectangle())
                                 .onDrag {
                                     guard editMode.isEditing, !model.isBusy, model.damagedPacks.isEmpty,
@@ -280,9 +272,6 @@ struct LibraryView: View {
             } action: { _, scrolled in
                 sidebarScrolledUnderToolbar = scrolled
             }
-            .onGeometryChange(for: CGFloat.self) {
-                $0.frame(in: .named("libraryList")).midX
-            } action: { sidebarCenterX = $0 }
             .contentMargins(.top, wideLayout ? 8 : nil, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(listColor(.systemGroupedBackground))
@@ -291,7 +280,7 @@ struct LibraryView: View {
                 if mode == .inactive { bulkSelected.removeAll() }
             }
             .disabled(model.isBusy)
-            .contentMargins(.bottom, workBannerHeight + editingActionsHeight, for: .scrollContent)
+            .contentMargins(.bottom, 12 + workBannerHeight + (editMode.isEditing ? editingActionsHeight : 0), for: .scrollContent)
             .overlay(alignment: .bottom) {
                 VStack(spacing: 0) {
                     Group {
@@ -305,19 +294,20 @@ struct LibraryView: View {
                         } else { packEditingActions() }
                     }
                     .frame(height: 68)
-                    .frame(maxWidth: .infinity)
-                    .offset(x: (packRowCenterX ?? sidebarCenterX) - sidebarCenterX)
+                    // Center in the list viewport; editing shifts row content
+                    // to make room for selection controls.
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .opacity(editMode.isEditing ? 1 : 0)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: editMode.isEditing)
 
                     .allowsHitTesting(editMode.isEditing)
                     .accessibilityHidden(!editMode.isEditing)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { editingActionsHeight = $0 }
+                    .frame(height: editMode.isEditing ? nil : 0)
                     CurrentWorkBanner()
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { workBannerHeight = $0 }
                 }
             }
-            .coordinateSpace(name: "libraryList")
             .navigationTitle(wideLayout ? "" : "내 스티커 팩")
             .navigationBarTitleDisplayMode(wideLayout ? .inline : .large)
             .toolbar {
@@ -378,6 +368,13 @@ struct LibraryView: View {
                 compactColumn = selected == nil ? .sidebar : .detail
                 columnVisibility = .automatic
             }
+        }
+        .onChange(of: compactColumn) { previous, current in
+            // Compact back navigation must also dismiss the selected pack.
+            // Sidebar visibility in the expanded layout does not dismiss it.
+            guard !wideLayout, activeTab == .library,
+                  previous == .detail, current == .sidebar else { return }
+            selected = nil
         }
         .onChange(of: PackLinkInbox.shared.received?.id) { _, received in if received == nil { Task { await model.refresh() } } }
         .sheet(item: $sharingPack) { pack in PackTextShareSheet(text: PackLinkList.links(for: [pack]).joined(separator: "\n")) }

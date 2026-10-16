@@ -14,7 +14,7 @@ struct InstalledPackView: View {
     let optimize: (Set<String>) -> Void
     let delete: () async -> Void
     @State private var images = StickerImages()
-    @State private var status = "길게 눌러 복사하거나 공유할 수 있어요."
+    @State private var status = "두 손가락으로 확대하거나 축소할 수 있어요."
     @State private var copiedID: String?
     @State private var sharedPNG: SharedPNG?
     @State private var permissionWarning = false
@@ -156,7 +156,7 @@ struct InstalledPackView: View {
             resetSelection()
             copiedID = nil
             storageBytes = nil
-            status = "길게 눌러 복사하거나 공유할 수 있어요."
+            status = "두 손가락으로 확대하거나 축소할 수 있어요."
         }
         .onChange(of: activeTab) { _, tab in
             if tab != .library { resetSelection() }

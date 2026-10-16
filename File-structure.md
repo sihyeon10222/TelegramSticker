@@ -310,3 +310,11 @@ Worker 타입 검사·배포 없는 번들 검사 완료. 테스트 실행·Work
 2026-10-17 선택 버튼 높이 보정: SelectionToggleButton의 높이와 완료 원형 지름을 44pt로 맞추고 fixedSize로 툴바 내부 수직 압축을 방지한다. 기존 타원↔원형 글래스 전환은 유지한다. 기존 파일 내부 변경이다.
 
 2026-10-17 목록 두 손가락 선택 복구: LibraryView의 수동 선택 원·편집 행 버튼을 제거하고 List(selection:)와 실제 EditMode 바인딩으로 시스템 다중 선택을 사용한다. bulkSelected는 상세 탐색 selected와 분리된 안정적인 바인딩으로 유지해 공유 진입 시 전체 선택을 보존한다. 시스템 제스처로 선택이 시작되면 편집 작업을 표시한다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다.
+
+2026-10-17 녹화 기반 선택 버튼 점 후속: 사이드바 재열기 중 상세 선택 버튼이 작은 흰 글래스로 축소된 뒤 복원되는 장면을 확인했다. SelectionControls는 시스템 툴바 배경을 사용하고 SelectionToggleButton의 직접 glassEffect·고정 크기·라벨 transition을 제거한다. 단일 시스템 Button의 선택 텍스트/완료 체크 및 confirm role을 사용해 열 이동 시 배경과 버튼을 내비게이션 바에서 함께 관리한다. 앞선 직접 글래스 형태 전환 설명을 대체하며 파일·타깃·리소스·저장 경로 변경은 없다.
+
+2026-10-17 선택 버튼 색상·모션 복구: SelectionToggleButton은 하나의 Button과 capsule glassEffect를 유지하며 64pt 편집/선택 버튼에서 44pt 파란 완료 버튼으로 폭·색을 함께 전환한다. 내부 글자/체크는 blurReplace를 사용하며 Reduce Motion을 존중한다. 별도 버튼 분기로 인한 모션 단절을 제거하고 시스템 공유 배경은 숨긴다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다.
+
+2026-10-17 사이드바 전환 흰 점 후속: SelectionToggleButton은 glassEffectTransition(.identity)로 툴바 재부착 중 글래스의 등장·퇴장 축소 전환을 생략한다. 바깥 transaction에서 내비게이션 애니메이션을 제거한 뒤 내부 active 값 전용 애니메이션만 적용해 사이드바 열 이동이 버튼의 글래스·라벨 전환에 전달되지 않도록 한다. 선택/완료의 폭·파란 tint·blurReplace와 시스템 사이드바 토글은 유지한다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다.
+
+2026-10-17 선택 버튼 렌더링 교체: 앞선 SwiftUI glassEffectTransition/transaction 조정을 제거했다. SelectionControls.swift 안의 SelectionToggleButton은 UIViewRepresentable로 하나의 UIButton을 유지하고 UIButton.Configuration.glass()/prominentGlass()로 배경과 라벨을 같은 네이티브 컨트롤에서 그린다. 사이드바 표시 변경만으로 configuration을 갱신하지 않으며 선택값이 바뀔 때만 네이티브 모양·색을 전환한다. SwiftUI glassEffect와 blurReplace 라벨은 제거하고 64×44pt 선택/편집 및 44×44pt 파란 완료 체크, 접근성 ID, Reduce Motion과 기존 동작을 유지한다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다.
