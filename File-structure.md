@@ -1,4 +1,18 @@
+2026-10-17 키보드 초기 크기 전환 후속: `StickerKeyboard/KeyboardViewController.swift`는 루트 UIInputView를 생성하는 loadView에서 높이 제약도 함께 설치한다. 초기 미지정 idiom은 실제 기기 idiom으로 보완하고 iPhone 방향은 초기 verticalSizeClass 대신 화면·scene 방향으로 판단한다. iPad의 임시 호스트 폭 <400pt를 플로팅 상태로 간주해 240pt를 요청하던 분기를 제거했다. 표시 전·후 같은 화면 기준으로 높이를 계산하며 회전 갱신은 유지한다. 앞선 플로팅 전용 240pt 설명을 대체한다. 파일·타깃·리소스·저장소 변경은 없으며 실제 전환 시각 검증은 실행하지 않는다.
+
+2026-10-17 iPad 키보드 높이: `StickerKeyboard/KeyboardViewController.swift`에서 iPhone 고정 높이를 iPad에 적용하던 경로를 분리했다. iPad는 호스트 화면 크기·방향에 따라 일반 모델 가로 352/세로 398pt, 대형 모델 가로 458/세로 398pt를 요청하고 좁은 플로팅 키보드는 240pt를 유지한다. 레이아웃 시 높이 변경이 필요한 경우만 갱신한다. iPhone 높이·상태·파일·타깃·리소스·저장 경로 변경은 없다. 기본 키보드와의 실제 높이 일치는 기기 UI에서 미검증이다.
+
 # 파일 구조와 작업 가이드
+
+2026-10-17 기본 높이 전환 회귀 복구: 사용자 사진에서 팩 줄만 남고 그리드가 접히는 회귀를 확인했다. UICollectionView에는 자체 콘텐츠 높이를 제공하는 intrinsic height가 없어 루트 높이 요청을 없애면 탭 줄만으로 수직 fitting이 완료될 수 있다. `StickerKeyboard/KeyboardViewController.swift`의 기본 UIInputView(.keyboard)·allowsSelfSizing과 기존 240/200/380pt 높이 제약(999)을 복구한다. fitting override·viewDidAppear 재요청은 복구하지 않는다. 중복 라이브러리/썸네일 준비 제거와 권한 기록 guard 이동은 유지한다. 기본 시스템 높이만으로 충분하다는 앞선 설명을 철회한다. 기존 파일 내부 수정으로 파일·타깃·리소스·저장소 변경은 없다. 이번 변경은 새로 발생한 접힘 회귀를 되돌리는 범위이며 원래의 간헐적 빈 화면·여백·전환 깜빡임을 해결했다고 판단하지 않는다.
+
+2026-10-17 키보드 깜빡임 재수정: 사용자 확인상 앞선 fitting override·높이 재게시 수정은 세 현상 모두에 효과가 없었다. 해당 접근을 철회하고 `StickerKeyboard/KeyboardViewController.swift`는 시스템 UIInputViewController의 기본 루트·기본 높이를 그대로 사용한다. loadView 교체, allowsSelfSizing, 240/200/380pt 루트 높이 제약, fitting override 및 viewDidAppear 재요청을 제거한다. 그리드는 실제 배정 영역으로 기존 최소 셀 크기와 최대 네 행을 계산하며 접근성 셀·팩 줄은 유지한다. 첫 라이브러리 복원은 viewWillAppear 한 곳에서 실행하고 같은 진입의 중복 썸네일 준비를 제거한다. `Views/KeyboardStatus.swift`는 표시 시작·접근 권한 변경 시에만 공유 접근 기록을 읽고 게시한다. 레이아웃마다 동기 defaults 접근을 반복하지 않는다. 키보드 기존 파일의 수명 주기·권한 관찰 책임 변경이며 파일·타깃·리소스·저장소 경계 변경은 없다. 이전 높이 협상 설명보다 이 항목을 우선한다. 테스트 없이 빌드·덮어쓰기 설치 대상으로 제공하며 사용자 앱에서 현상이 사라졌다고 판정한 결과는 아니다.
+
+기본 높이 재수정 완료 범위: 앱·키보드 확장 iPhone Debug 빌드 성공, 연결된 iPhone 15 Pro에 기존 데이터 유지 덮어쓰기 설치 및 앱 실행 성공. 자동·수동 테스트는 실행하지 않았다. 기본 루트의 실제 호스트 높이와 세 현상의 개선 여부는 미검증이다.
+
+2026-10-17 키보드 초기 높이 협상 후속: `StickerKeyboard/KeyboardViewController.swift` 내부의 비공개 StickerKeyboardInputView가 UIKit의 두 systemLayoutSizeFitting 진입점에 동일한 요청 높이(세로 240pt·가로 200pt·접근성 380pt)를 반환한다. 초기 제약 설치 전의 0 높이 또는 이전 키보드 제안 크기에 측정을 맡기지 않으며 intrinsicContentSize 재정의는 추가하지 않는다. 루트의 flexibleHeight autoresizing을 제거하고 기존 우선순위 999 높이 제약과 fitting 값을 함께 갱신한다. viewDidAppear에서 팩 줄과 최소 한 행도 들어가지 않는 높이일 때만 기존 제약을 한 번 재게시한다. 필수 호스트 제약·그리드 실제 bounds 계산·상태 저장·시스템 지구본/마이크 영역은 유지한다. 기존 파일 내부의 키보드 높이 측정 책임 변경이며 파일·타깃·리소스·저장 경로 변경은 없다. 호스트 소유 상단 17pt 여백 및 시스템 한글 키보드가 먼저 재배치되는 전환은 해결 판정하지 않는다.
+
+키보드 높이 후속 빌드·설치: 앱과 키보드 확장의 iPhone Debug 빌드 성공. 연결된 iPhone 15 Pro에 기존 앱을 덮어쓰기 설치하고 실행했다. 자동·수동 테스트는 실행하지 않았으며 간헐적 빈 키보드·전환 깨짐의 실제 해결 여부는 미검증이다.
 
 2026-10-17 iPhone·iPad 사이드바 선택 버튼 흰 점 후속: `Features/Library/SelectionControls.swift`는 전 플랫폼에서 동일한 시스템 Button과 visible 툴바 공유 배경을 사용한다. iOS 전용 직접 glassEffect·고정 크기·blurReplace·transaction 보정을 제거해 사이드바 열 이동 중 버튼 내용과 글래스를 시스템 내비게이션 바가 함께 이동하도록 한다. 선택/편집과 파란 완료 체크 및 동작 줄이기 처리는 유지한다. 같은 버튼을 사용하는 `Features/Settings/DownloadLogsView.swift`도 시스템 툴바 배경을 표시한다. 앞선 iOS 커스텀 선택 글래스 전환 설명을 대체하며 파일·타깃·리소스·저장 경로 변경은 없다.
 
@@ -372,3 +386,16 @@ Catalyst 시작 시 UIKit 시스템 탭과 NavigationSplitView의 네이티브 N
 2026-10-17 Catalyst 최소 창 탭바 잘림 수정: App/TelegramStickerApp.swift는 콘텐츠에 창 최소 높이 480pt를 중복 강제하지 않고 실제 제안 크기에 맞춘다. 창 최소 640×480은 기존 MacWindowConfiguration의 UIWindowScene sizeRestrictions에서 유지하고 SwiftUI windowResizability는 automatic으로 둔다. 제목 표시줄만큼 콘텐츠가 창 아래로 넘치는 것을 방지하며 탭바 디자인·iOS 동작·타깃·파일·저장소 변경은 없다.
 
 2026-10-17 최소 창 탭바 수정 빌드·설치: Catalyst arm64 Debug와 연결된 iPhone Debug 빌드 성공. 맥 및 iPhone 15 Pro에 기존 데이터 유지 덮어쓰기 설치·실행 완료. 자동 테스트·창 크기 변경 수동 테스트는 실행하지 않았다.
+
+2026-10-17 iPhone·iPad 상세 공유 무반응 수정: UI/PackLinkSharing.swift의 iOS PackLinkShareButton은 기본 ShareLink로 공유창 표시와 버튼 앵커를 시스템에 맡긴다. 툴바 background UIView의 부착 여부에 의존하던 ShareAnchor/AnchorView를 제거했다. 기존 SwiftUI 아이콘·비활성 조건·접근성 ID를 유지하며 Catalyst의 실제 UIButton 앵커와 색상은 변경하지 않는다. 파일·타깃·저장소 변경은 없다.
+
+2026-10-17 iOS 상세 공유 수정 확인: Catalyst arm64 Debug 및 연결된 iPhone Debug 빌드 성공. 맥과 iPhone 15 Pro에 기존 데이터 유지 방식으로 덮어쓰기 설치했다. 자동 테스트·공유 수동 테스트는 실행하지 않았다.
+
+2026-10-17 iOS 편집/선택 전환 복원: Features/Library/SelectionControls.swift는 iPhone·iPad에서 기존 커스텀 캡슐 glassEffect, 활성 상태 44pt 파란 체크 버튼, blurReplace·폭/색 전환과 시스템 툴바 배경 숨김을 복원한다. Catalyst는 현재 시스템 버튼·표시 배경을 유지한다. 파일·타깃·저장소 변경은 없다.
+
+2026-10-17 선택 전환 복원 빌드·설치: Catalyst arm64 Debug 및 연결된 iPhone Debug 빌드 성공. 맥과 iPhone 15 Pro에 기존 데이터 유지 덮어쓰기 설치·실행 완료. 자동 테스트·수동 UI 테스트와 iPad 설치는 실행하지 않았다.
+
+
+2026-10-17 맥 백그라운드 복사 팝업: `MacDesktop/`는 macOS 전용 `StickerBridgeDesktop.bundle` 타깃이다. `DesktopPlugin.swift`가 AppKit 메뉴 막대·accessory 실행 정책·로그인 실행(SMAppService)·Carbon 전역 ⌥⇧S·비활성 NSPanel·NSGlassEffectView·팩/최근 그리드를 관리한다. `DesktopBridge.swift`는 Foundation/Objective-C 호환 브리지 계약으로 번들과 Catalyst 앱에만 컴파일한다. 앱의 `App/MacDesktopCoordinator.swift`는 번들을 유지·로딩하고 기존 LibraryModel/LibraryReader에서 표시 데이터를 읽어 StickerCopyService로 PNG/GIF를 복사한다. 파일 경로 검증과 라이브러리 게시 경로는 기존 구현을 따른다. 설정의 MacDesktopSettings에서 로그인 실행·메뉴 막대 표시·오류를 관리하고 팝업 설정 버튼은 기존 앱의 설정 탭을 연다. Finder reopen은 관리 창을 표시하며 로그인 실행은 창을 숨긴다. Dock은 Catalyst에만 LSUIElement 및 accessory 정책으로 숨긴다.
+
+번들은 Catalyst에만 의존·임베드·서명하며 iOS 및 키보드 확장에는 포함하지 않는다. 네트워크·변환·키보드 State 코드를 macOS 번들에 연결하지 않는다. 최근 24개 ID(`mac.recentStickers`), 마지막 팩(`mac.lastPack`), 메뉴 표시(`mac.menuVisible`), 로그인 최초 구성(`mac.loginConfigured`)은 맥 프로세스 기본 UserDefaults에만 저장하며 App Group 라이브러리·iOS 데이터 경로·CloudKit 형식은 변경하지 않는다. 복사 성공만 창을 닫으며 오류는 표시한다. 창 바깥 클릭·Esc·단축키 재입력으로도 닫힌다.

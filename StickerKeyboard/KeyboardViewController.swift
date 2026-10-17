@@ -50,10 +50,20 @@ final class KeyboardViewController: UIInputViewController,
     var keyboardHeight: NSLayoutConstraint?
 
     override func loadView() {
-        let keyboard = UIInputView(frame: CGRect(x: 0, y: 0, width: 0, height: preferredKeyboardHeight), inputViewStyle: .keyboard)
+        let requestedHeight = preferredKeyboardHeight
+        let keyboard = UIInputView(
+            frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: requestedHeight),
+            inputViewStyle: .keyboard
+        )
         keyboard.allowsSelfSizing = true
         keyboard.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         keyboard.clipsToBounds = true
+        // Install the height before UIKit's first fitting pass, including the
+        // interval before viewDidLoad builds the collection view hierarchy.
+        let height = keyboard.heightAnchor.constraint(equalToConstant: requestedHeight)
+        height.priority = UILayoutPriority(999)
+        height.isActive = true
+        keyboardHeight = height
         inputView = keyboard
     }
 
@@ -65,13 +75,6 @@ final class KeyboardViewController: UIInputViewController,
         view.clipsToBounds = true
         view.accessibilityIdentifier = "keyboardSurface"
         state.restoreSelection()
-        // One documented height request. Keep UIInputView's native sizing;
-        // overriding fitting/intrinsic size as well causes a second negotiation.
-        let keyboardHeight = view.heightAnchor.constraint(equalToConstant: preferredKeyboardHeight)
-        keyboardHeight.priority = UILayoutPriority(999)
-        keyboardHeight.isActive = true
-        self.keyboardHeight = keyboardHeight
-
         collectionView.backgroundColor = .clear
         collectionView.contentInsetAdjustmentBehavior = .never
         // The keyboard has its own non-overlapping controls, so host scroll-edge blur is inappropriate.
@@ -217,15 +220,12 @@ final class KeyboardViewController: UIInputViewController,
             statusLabel.bottomAnchor.constraint(equalTo: toast.bottomAnchor, constant: -8)
         ])
 
-        // Only the root requests a height. The grid fills the size UIKit assigns it.
+        // One root height request; the grid fills the actual assigned bounds.
         updateContentMetrics()
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitVerticalSizeClass.self]) {
             (controller: KeyboardViewController, _: UITraitCollection) in
             controller.updateContentMetrics()
-            controller.collectionView.collectionViewLayout.invalidateLayout()
         }
-        refreshPermission()
-        _ = restoreInitialLibrary()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -242,12 +242,12 @@ final class KeyboardViewController: UIInputViewController,
             needsRevealSelectedTab = true
             updateContentMetrics()
             let preferencesChanged = state.reloadPreferences()
-            if !restoreInitialLibrary(), preferencesChanged {
-                state.restorePackOrder()
+            let libraryChanged = restoreInitialLibrary()
+            if !libraryChanged {
+                if preferencesChanged { state.restorePackOrder() }
                 prewarmFirstFrame()
-                applySelection()
+                if preferencesChanged { applySelection() }
             }
-            prewarmFirstFrame()
             collectionView.setContentOffset(.zero, animated: false)
             refreshPermission(resetStatus: true)
             collectionView.visibleCells.forEach { $0.isHighlighted = false }
@@ -261,6 +261,9 @@ final class KeyboardViewController: UIInputViewController,
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
+        if keyboardHeight?.constant != preferredKeyboardHeight {
+            updateContentMetrics()
+        }
         updateSwitchKey()
         refreshPermission()
     }
@@ -334,8 +337,25 @@ final class KeyboardViewController: UIInputViewController,
     }
 
     var preferredKeyboardHeight: CGFloat {
-        traitCollection.preferredContentSizeCategory.isAccessibilityCategory
-            ? 380 : (traitCollection.verticalSizeClass == .compact ? 200 : 240)
+        let accessible = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        // Initial traits and the host's provisional keyboard width can describe
+        // the previous keyboard. Neither should select a temporary smaller size.
+        let screenSize = viewIfLoaded?.window?.windowScene?.screen.bounds.size
+            ?? UIScreen.main.bounds.size
+        let orientation = viewIfLoaded?.window?.windowScene?.interfaceOrientation
+        let landscape = orientation.map { $0 == .unknown
+            ? screenSize.width > screenSize.height : $0.isLandscape }
+            ?? (screenSize.width > screenSize.height)
+        let idiom = traitCollection.userInterfaceIdiom == .unspecified
+            ? UIDevice.current.userInterfaceIdiom : traitCollection.userInterfaceIdiom
+        guard idiom == .pad else {
+            return accessible ? 380 : (landscape ? 200 : 240)
+        }
+        let largePad = min(screenSize.width, screenSize.height) >= 1000
+        let height: CGFloat = largePad
+            ? (landscape ? 458 : 398)
+            : (landscape ? 352 : 398)
+        return accessible ? max(380, height) : height
     }
 
     func updateContentMetrics() {

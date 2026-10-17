@@ -39,53 +39,22 @@ struct PackLinksShareView: View {
 struct PackLinkShareButton: View {
     let text: String
     var disabled = false
-    #if !targetEnvironment(macCatalyst)
-    @State private var anchor = ShareAnchor()
-    #endif
 
     var body: some View {
         #if targetEnvironment(macCatalyst)
         CatalystPackShareButton(text: text, disabled: disabled || text.isEmpty)
             .frame(width: 36, height: 36)
         #else
-        Button { anchor.present(text: text) } label: {
+        ShareLink(item: text) {
             Label("Sticker Pack 링크 공유", systemImage: "square.and.arrow.up")
         }
         .labelStyle(.iconOnly)
         .disabled(disabled || text.isEmpty)
         .accessibilityIdentifier("sharePackLink")
-        .background { AnchorView(anchor: anchor) }
         #endif
     }
 
-    #if !targetEnvironment(macCatalyst)
-    @MainActor private final class ShareAnchor {
-        weak var view: UIView?
-        func present(text: String) {
-            guard let view, let window = view.window else { return }
-            var responder: UIResponder? = view
-            while responder != nil && !(responder is UIViewController) { responder = responder?.next }
-            guard let presenter = responder as? UIViewController, presenter.view.window === window else { return }
-            let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
-            if let popover = activity.popoverPresentationController {
-                popover.sourceView = view
-                popover.sourceRect = view.bounds
-            }
-            presenter.present(activity, animated: true)
-        }
-    }
 
-    private struct AnchorView: UIViewRepresentable {
-        let anchor: ShareAnchor
-        func makeUIView(context: Context) -> UIView {
-            let view = UIView()
-            view.isUserInteractionEnabled = false
-            anchor.view = view
-            return view
-        }
-        func updateUIView(_ view: UIView, context: Context) { anchor.view = view }
-    }
-    #endif
 }
 
 #if targetEnvironment(macCatalyst)

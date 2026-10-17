@@ -5,6 +5,137 @@
 	};
 	objectVersion = 110;
 	objects = {
+		DD5000000000000000000005 = {
+			"isa" = "PBXSourcesBuildPhase";
+			"files" = (
+			);
+		};
+		DD500000000000000000000D = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "DD5000000000000000000003";
+			"platformFilter" = "maccatalyst";
+			"settings" = {
+				"ATTRIBUTES" = (
+					"CodeSignOnCopy",
+					"RemoveHeadersOnCopy",
+				);
+			};
+		};
+		DD5000000000000000000006 = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"files" = (
+			);
+		};
+		DD500000000000000000000E = {
+			"isa" = "PBXCopyFilesBuildPhase";
+			"dstPath" = "";
+			"dstSubfolderSpec" = "13";
+			"name" = "Embed Mac Desktop";
+			"files" = (
+				"DD500000000000000000000D",
+			);
+		};
+		DD5000000000000000000007 = {
+			"isa" = "XCBuildConfiguration";
+			"name" = "Debug";
+			"buildSettings" = {
+				"SDKROOT" = "macosx";
+				"SUPPORTED_PLATFORMS" = "macosx";
+				"MACOSX_DEPLOYMENT_TARGET" = "27.0";
+				"PRODUCT_NAME" = "StickerBridgeDesktop";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.sihyeon.TelegramSticker.Desktop";
+				"SWIFT_VERSION" = "5.0";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_NSPrincipalClass" = "StickerBridgeDesktopPlugin";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"DEVELOPMENT_TEAM" = "RKQCX265PQ";
+				"SKIP_INSTALL" = "YES";
+				"ENABLE_APP_SANDBOX" = "YES";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+			};
+		};
+		DD5000000000000000000008 = {
+			"isa" = "XCBuildConfiguration";
+			"name" = "Release";
+			"buildSettings" = {
+				"SDKROOT" = "macosx";
+				"SUPPORTED_PLATFORMS" = "macosx";
+				"MACOSX_DEPLOYMENT_TARGET" = "27.0";
+				"PRODUCT_NAME" = "StickerBridgeDesktop";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.sihyeon.TelegramSticker.Desktop";
+				"SWIFT_VERSION" = "5.0";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_NSPrincipalClass" = "StickerBridgeDesktopPlugin";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"DEVELOPMENT_TEAM" = "RKQCX265PQ";
+				"SKIP_INSTALL" = "YES";
+				"ENABLE_APP_SANDBOX" = "YES";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+			};
+		};
+		DD5000000000000000000009 = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"DD5000000000000000000007",
+				"DD5000000000000000000008",
+			);
+			"defaultConfigurationIsVisible" = "0";
+			"defaultConfigurationName" = "Release";
+		};
+		DD5000000000000000000001 = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "MacDesktop/DesktopBridge.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		DD5000000000000000000002 = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "DD5000000000000000000001";
+			"platformFilter" = "maccatalyst";
+		};
+		DD500000000000000000000A = {
+			"isa" = "PBXNativeTarget";
+			"name" = "StickerBridgeDesktop";
+			"productName" = "StickerBridgeDesktop";
+			"productReference" = "DD5000000000000000000003";
+			"productType" = "com.apple.product-type.bundle";
+			"buildConfigurationList" = "DD5000000000000000000009";
+			"buildPhases" = (
+				"DD5000000000000000000005",
+				"DD5000000000000000000006",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+			);
+			"fileSystemSynchronizedGroups" = (
+				"DD5000000000000000000004",
+			);
+		};
+		DD5000000000000000000003 = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.cfbundle";
+			"path" = "StickerBridgeDesktop.bundle";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		DD500000000000000000000B = {
+			"isa" = "PBXContainerItemProxy";
+			"containerPortal" = "1C6F081A3078037500577D61";
+			"proxyType" = "1";
+			"remoteGlobalIDString" = "DD500000000000000000000A";
+			"remoteInfo" = "StickerBridgeDesktop";
+		};
+		DD5000000000000000000004 = {
+			"isa" = "PBXFileSystemSynchronizedRootGroup";
+			"path" = "MacDesktop";
+			"sourceTree" = "<group>";
+		};
+		DD500000000000000000000C = {
+			"isa" = "PBXTargetDependency";
+			"target" = "DD500000000000000000000A";
+			"targetProxy" = "DD500000000000000000000B";
+			"platformFilter" = "maccatalyst";
+		};
 
 /* Begin PBXBuildFile section */
 		1C6F0855307803AA00577D61 /* StickerKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1C6F084E307803AA00577D61 /* StickerKeyboard.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -146,6 +277,8 @@
 				BA1000010000000000000001 /* StickerSamples */,
 				BA1000010000000000000002 /* Shared */,
 				1C6F08233078037500577D61 /* Products */,
+				DD5000000000000000000004,
+				DD5000000000000000000001,
 			);
 			sourceTree = "<group>";
 		};
@@ -156,6 +289,7 @@
 				1C6F082F3078037600577D61 /* TelegramStickerTests.xctest */,
 				1C6F08393078037600577D61 /* TelegramStickerUITests.xctest */,
 				1C6F084E307803AA00577D61 /* StickerKeyboard.appex */,
+				DD5000000000000000000003,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -182,11 +316,13 @@
 				1C6F081F3078037500577D61 /* Frameworks */,
 				1C6F08203078037500577D61 /* Resources */,
 				1C6F085A307803AA00577D61 /* Embed Foundation Extensions */,
+				DD500000000000000000000E,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				1C6F0854307803AA00577D61 /* PBXTargetDependency */,
+				DD500000000000000000000C,
 			);
 			fileSystemSynchronizedGroups = (
 				1C6F08243078037500577D61 /* TelegramSticker */,
@@ -312,6 +448,7 @@
 				1C6F082E3078037600577D61 /* TelegramStickerTests */,
 				1C6F08383078037600577D61 /* TelegramStickerUITests */,
 				1C6F084D307803AA00577D61 /* StickerKeyboard */,
+				DD500000000000000000000A,
 			);
 		};
 /* End PBXProject section */
@@ -343,6 +480,7 @@
 		1C6F081E3078037500577D61 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
+				DD5000000000000000000002,
 			);
 		};
 		1C6F082B3078037600577D61 /* Sources */ = {
@@ -524,6 +662,7 @@
 				INFOPLIST_FILE = "Configuration/App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = StickerBridge;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				"INFOPLIST_KEY_LSUIElement[sdk=macosx*]" = YES;
 				INFOPLIST_KEY_StickerBridgeCloudKitEnabled = "$(STICKERBRIDGE_CLOUDKIT_ENABLED)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -573,6 +712,7 @@
 				INFOPLIST_FILE = "Configuration/App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = StickerBridge;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				"INFOPLIST_KEY_LSUIElement[sdk=macosx*]" = YES;
 				INFOPLIST_KEY_StickerBridgeCloudKitEnabled = "$(STICKERBRIDGE_CLOUDKIT_ENABLED)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

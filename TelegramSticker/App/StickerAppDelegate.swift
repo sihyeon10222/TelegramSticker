@@ -2,6 +2,9 @@ import UIKit
 
 final class StickerAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        #if targetEnvironment(macCatalyst)
+        MacDesktopCoordinator.shared.start()
+        #endif
         if LibraryChangeJournal.cloudKitConfigured { application.registerForRemoteNotifications() }
         return true
     }

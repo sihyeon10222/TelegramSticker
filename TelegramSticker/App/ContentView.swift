@@ -42,6 +42,9 @@ struct ContentView: View {
         // Keep iPad navigation at the bottom while retaining each screen's actual size class.
         .environment(\.horizontalSizeClass, .compact)
         .environment(\.activeAppTab, selectedTab)
+        #if targetEnvironment(macCatalyst)
+        .onReceive(NotificationCenter.default.publisher(for: .macOpenManagement)) { _ in selectedTab = .settings }
+        #endif
         .environment(\.libraryHomeRequest, libraryHomeRequest)
         .sheet(item: $imports.presentedImport) { session in
             ImportView(model: session)

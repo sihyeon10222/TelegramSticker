@@ -12,6 +12,9 @@ struct SettingsView: View {
                     KeyboardSetupAction(kind: .fullAccess)
                 }
                 #endif
+                #if targetEnvironment(macCatalyst)
+                MacDesktopSettings()
+                #endif
                 SyncSettingsView()
                 Section("저장 공간") { StorageSettingsView() }
                 Section("앱 초기화") { AppResetButton() }
