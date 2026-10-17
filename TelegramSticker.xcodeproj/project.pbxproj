@@ -5,137 +5,6 @@
 	};
 	objectVersion = 110;
 	objects = {
-		DD5000000000000000000005 = {
-			"isa" = "PBXSourcesBuildPhase";
-			"files" = (
-			);
-		};
-		DD500000000000000000000D = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "DD5000000000000000000003";
-			"platformFilter" = "maccatalyst";
-			"settings" = {
-				"ATTRIBUTES" = (
-					"CodeSignOnCopy",
-					"RemoveHeadersOnCopy",
-				);
-			};
-		};
-		DD5000000000000000000006 = {
-			"isa" = "PBXFrameworksBuildPhase";
-			"files" = (
-			);
-		};
-		DD500000000000000000000E = {
-			"isa" = "PBXCopyFilesBuildPhase";
-			"dstPath" = "";
-			"dstSubfolderSpec" = "13";
-			"name" = "Embed Mac Desktop";
-			"files" = (
-				"DD500000000000000000000D",
-			);
-		};
-		DD5000000000000000000007 = {
-			"isa" = "XCBuildConfiguration";
-			"name" = "Debug";
-			"buildSettings" = {
-				"SDKROOT" = "macosx";
-				"SUPPORTED_PLATFORMS" = "macosx";
-				"MACOSX_DEPLOYMENT_TARGET" = "27.0";
-				"PRODUCT_NAME" = "StickerBridgeDesktop";
-				"PRODUCT_BUNDLE_IDENTIFIER" = "com.sihyeon.TelegramSticker.Desktop";
-				"SWIFT_VERSION" = "5.0";
-				"GENERATE_INFOPLIST_FILE" = "YES";
-				"INFOPLIST_KEY_NSPrincipalClass" = "StickerBridgeDesktopPlugin";
-				"CODE_SIGN_STYLE" = "Automatic";
-				"DEVELOPMENT_TEAM" = "RKQCX265PQ";
-				"SKIP_INSTALL" = "YES";
-				"ENABLE_APP_SANDBOX" = "YES";
-				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
-			};
-		};
-		DD5000000000000000000008 = {
-			"isa" = "XCBuildConfiguration";
-			"name" = "Release";
-			"buildSettings" = {
-				"SDKROOT" = "macosx";
-				"SUPPORTED_PLATFORMS" = "macosx";
-				"MACOSX_DEPLOYMENT_TARGET" = "27.0";
-				"PRODUCT_NAME" = "StickerBridgeDesktop";
-				"PRODUCT_BUNDLE_IDENTIFIER" = "com.sihyeon.TelegramSticker.Desktop";
-				"SWIFT_VERSION" = "5.0";
-				"GENERATE_INFOPLIST_FILE" = "YES";
-				"INFOPLIST_KEY_NSPrincipalClass" = "StickerBridgeDesktopPlugin";
-				"CODE_SIGN_STYLE" = "Automatic";
-				"DEVELOPMENT_TEAM" = "RKQCX265PQ";
-				"SKIP_INSTALL" = "YES";
-				"ENABLE_APP_SANDBOX" = "YES";
-				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
-			};
-		};
-		DD5000000000000000000009 = {
-			"isa" = "XCConfigurationList";
-			"buildConfigurations" = (
-				"DD5000000000000000000007",
-				"DD5000000000000000000008",
-			);
-			"defaultConfigurationIsVisible" = "0";
-			"defaultConfigurationName" = "Release";
-		};
-		DD5000000000000000000001 = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "MacDesktop/DesktopBridge.swift";
-			"sourceTree" = "SOURCE_ROOT";
-		};
-		DD5000000000000000000002 = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "DD5000000000000000000001";
-			"platformFilter" = "maccatalyst";
-		};
-		DD500000000000000000000A = {
-			"isa" = "PBXNativeTarget";
-			"name" = "StickerBridgeDesktop";
-			"productName" = "StickerBridgeDesktop";
-			"productReference" = "DD5000000000000000000003";
-			"productType" = "com.apple.product-type.bundle";
-			"buildConfigurationList" = "DD5000000000000000000009";
-			"buildPhases" = (
-				"DD5000000000000000000005",
-				"DD5000000000000000000006",
-			);
-			"buildRules" = (
-			);
-			"dependencies" = (
-			);
-			"fileSystemSynchronizedGroups" = (
-				"DD5000000000000000000004",
-			);
-		};
-		DD5000000000000000000003 = {
-			"isa" = "PBXFileReference";
-			"explicitFileType" = "wrapper.cfbundle";
-			"path" = "StickerBridgeDesktop.bundle";
-			"sourceTree" = "BUILT_PRODUCTS_DIR";
-		};
-		DD500000000000000000000B = {
-			"isa" = "PBXContainerItemProxy";
-			"containerPortal" = "1C6F081A3078037500577D61";
-			"proxyType" = "1";
-			"remoteGlobalIDString" = "DD500000000000000000000A";
-			"remoteInfo" = "StickerBridgeDesktop";
-		};
-		DD5000000000000000000004 = {
-			"isa" = "PBXFileSystemSynchronizedRootGroup";
-			"path" = "MacDesktop";
-			"sourceTree" = "<group>";
-		};
-		DD500000000000000000000C = {
-			"isa" = "PBXTargetDependency";
-			"target" = "DD500000000000000000000A";
-			"targetProxy" = "DD500000000000000000000B";
-			"platformFilter" = "maccatalyst";
-		};
 
 /* Begin PBXBuildFile section */
 		1C6F0855307803AA00577D61 /* StickerKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1C6F084E307803AA00577D61 /* StickerKeyboard.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -145,6 +14,8 @@
 		BC3000020000000000000002 /* StickerKeyboard/State/KeyboardPackOrderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000002 /* StickerKeyboard/State/KeyboardPackOrderStore.swift */; };
 		BC3000020000000000000003 /* StickerKeyboard/State/RecentStickerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000003 /* StickerKeyboard/State/RecentStickerStore.swift */; };
 		BC3000020000000000000004 /* StickerKeyboard/Views/StickerGridLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000004 /* StickerKeyboard/Views/StickerGridLayout.swift */; };
+		DD5000000000000000000002 /* MacDesktop/DesktopBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD5000000000000000000001 /* MacDesktop/DesktopBridge.swift */; platformFilter = maccatalyst; };
+		DD500000000000000000000D /* StickerBridgeDesktop.bundle in Embed Mac Desktop */ = {isa = PBXBuildFile; fileRef = DD5000000000000000000003 /* StickerBridgeDesktop.bundle */; platformFilter = maccatalyst; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -169,6 +40,13 @@
 			remoteGlobalIDString = 1C6F084D307803AA00577D61;
 			remoteInfo = StickerKeyboard;
 		};
+		DD500000000000000000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1C6F081A3078037500577D61 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DD500000000000000000000A;
+			remoteInfo = StickerBridgeDesktop;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -181,6 +59,15 @@
 			);
 			name = "Embed Foundation Extensions";
 		};
+		DD500000000000000000000E /* Embed Mac Desktop */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = "";
+			dstSubfolder = PlugIns;
+			files = (
+				DD500000000000000000000D /* StickerBridgeDesktop.bundle in Embed Mac Desktop */,
+			);
+			name = "Embed Mac Desktop";
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -192,6 +79,8 @@
 		BC3000010000000000000002 /* StickerKeyboard/State/KeyboardPackOrderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickerKeyboard/State/KeyboardPackOrderStore.swift; sourceTree = SOURCE_ROOT; };
 		BC3000010000000000000003 /* StickerKeyboard/State/RecentStickerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickerKeyboard/State/RecentStickerStore.swift; sourceTree = SOURCE_ROOT; };
 		BC3000010000000000000004 /* StickerKeyboard/Views/StickerGridLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickerKeyboard/Views/StickerGridLayout.swift; sourceTree = SOURCE_ROOT; };
+		DD5000000000000000000001 /* MacDesktop/DesktopBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDesktop/DesktopBridge.swift; sourceTree = SOURCE_ROOT; };
+		DD5000000000000000000003 /* StickerBridgeDesktop.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = StickerBridgeDesktop.bundle; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -238,6 +127,11 @@
 			path = Shared;
 			sourceTree = "<group>";
 		};
+		DD5000000000000000000004 /* MacDesktop */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MacDesktop;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -263,6 +157,11 @@
 			files = (
 			);
 		};
+		DD5000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -277,8 +176,8 @@
 				BA1000010000000000000001 /* StickerSamples */,
 				BA1000010000000000000002 /* Shared */,
 				1C6F08233078037500577D61 /* Products */,
-				DD5000000000000000000004,
-				DD5000000000000000000001,
+				DD5000000000000000000004 /* MacDesktop */,
+				DD5000000000000000000001 /* MacDesktop/DesktopBridge.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -289,7 +188,7 @@
 				1C6F082F3078037600577D61 /* TelegramStickerTests.xctest */,
 				1C6F08393078037600577D61 /* TelegramStickerUITests.xctest */,
 				1C6F084E307803AA00577D61 /* StickerKeyboard.appex */,
-				DD5000000000000000000003,
+				DD5000000000000000000003 /* StickerBridgeDesktop.bundle */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -316,13 +215,13 @@
 				1C6F081F3078037500577D61 /* Frameworks */,
 				1C6F08203078037500577D61 /* Resources */,
 				1C6F085A307803AA00577D61 /* Embed Foundation Extensions */,
-				DD500000000000000000000E,
+				DD500000000000000000000E /* Embed Mac Desktop */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				1C6F0854307803AA00577D61 /* PBXTargetDependency */,
-				DD500000000000000000000C,
+				DD500000000000000000000C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				1C6F08243078037500577D61 /* TelegramSticker */,
@@ -400,6 +299,23 @@
 			productReference = 1C6F084E307803AA00577D61 /* StickerKeyboard.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		DD500000000000000000000A /* StickerBridgeDesktop */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DD5000000000000000000009 /* Build configuration list for PBXNativeTarget "StickerBridgeDesktop" */;
+			buildPhases = (
+				DD5000000000000000000005 /* Sources */,
+				DD5000000000000000000006 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				DD5000000000000000000004 /* MacDesktop */,
+			);
+			name = StickerBridgeDesktop;
+			productName = StickerBridgeDesktop;
+			productReference = DD5000000000000000000003 /* StickerBridgeDesktop.bundle */;
+			productType = "com.apple.product-type.bundle";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -448,7 +364,7 @@
 				1C6F082E3078037600577D61 /* TelegramStickerTests */,
 				1C6F08383078037600577D61 /* TelegramStickerUITests */,
 				1C6F084D307803AA00577D61 /* StickerKeyboard */,
-				DD500000000000000000000A,
+				DD500000000000000000000A /* StickerBridgeDesktop */,
 			);
 		};
 /* End PBXProject section */
@@ -480,7 +396,7 @@
 		1C6F081E3078037500577D61 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
-				DD5000000000000000000002,
+				DD5000000000000000000002 /* MacDesktop/DesktopBridge.swift in Sources */,
 			);
 		};
 		1C6F082B3078037600577D61 /* Sources */ = {
@@ -498,6 +414,11 @@
 			);
 		};
 		1C6F084A307803AA00577D61 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		DD5000000000000000000005 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
 			);
@@ -520,6 +441,12 @@
 			platformFilter = ios;
 			target = 1C6F084D307803AA00577D61 /* StickerKeyboard */;
 			targetProxy = 1C6F0853307803AA00577D61 /* PBXContainerItemProxy */;
+		};
+		DD500000000000000000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = maccatalyst;
+			target = DD500000000000000000000A /* StickerBridgeDesktop */;
+			targetProxy = DD500000000000000000000B /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -650,6 +577,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "$(STICKERBRIDGE_APP_ENTITLEMENTS)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -700,6 +628,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "$(STICKERBRIDGE_APP_ENTITLEMENTS)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -889,6 +818,44 @@
 			};
 			name = Release;
 		};
+		DD5000000000000000000007 /* Debug configuration for PBXNativeTarget "StickerBridgeDesktop" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = RKQCX265PQ;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSPrincipalClass = StickerBridgeDesktopPlugin;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sihyeon.TelegramSticker.Desktop;
+				PRODUCT_NAME = StickerBridgeDesktop;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		DD5000000000000000000008 /* Release configuration for PBXNativeTarget "StickerBridgeDesktop" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = RKQCX265PQ;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSPrincipalClass = StickerBridgeDesktopPlugin;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sihyeon.TelegramSticker.Desktop;
+				PRODUCT_NAME = StickerBridgeDesktop;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -929,6 +896,14 @@
 			buildConfigurations = (
 				1C6F0858307803AA00577D61 /* Debug configuration for PBXNativeTarget "StickerKeyboard" */,
 				1C6F0859307803AA00577D61 /* Release configuration for PBXNativeTarget "StickerKeyboard" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		DD5000000000000000000009 /* Build configuration list for PBXNativeTarget "StickerBridgeDesktop" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DD5000000000000000000007 /* Debug configuration for PBXNativeTarget "StickerBridgeDesktop" */,
+				DD5000000000000000000008 /* Release configuration for PBXNativeTarget "StickerBridgeDesktop" */,
 			);
 			defaultConfigurationName = Release;
 		};
