@@ -47,9 +47,42 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
         NSAppleEventManager.shared().currentAppleEvent?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
     }
 
+    func writeGIFToPasteboard(_ data: Data) throws {
+        // Supply both representations on one item: image consumers read GIF bytes,
+        // attachment consumers read the same animation as a real .gif file.
+        let fm = FileManager.default
+        let directory = try fm.url(for: .cachesDirectory, in: .userDomainMask,
+                                   appropriateFor: nil, create: true)
+            .appendingPathComponent("StickerBridgeClipboard", isDirectory: true)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("Sticker-\(UUID().uuidString).gif")
+        try data.write(to: file, options: .atomic)
+        let item = NSPasteboardItem()
+        item.setString(file.absoluteString, forType: .fileURL)
+        item.setPropertyList([file.path], forType: NSPasteboard.PasteboardType("NSFilenamesPboardType"))
+        item.setData(data, forType: NSPasteboard.PasteboardType("com.compuserve.gif"))
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.writeObjects([item]) else {
+            try? fm.removeItem(at: file)
+            throw CocoaError(.fileWriteUnknown)
+        }
+        // Keep the current attachment after the picker closes and across app exits.
+        // Only retire old exports on a later successful clipboard replacement.
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        for old in (try? fm.contentsOfDirectory(at: directory,
+                    includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] {
+            guard old != file, old.pathExtension == "gif",
+                  let date = try? old.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                  date < cutoff else { continue }
+            try? fm.removeItem(at: old)
+        }
+    }
+
     func start(snapshot: @escaping () -> [NSDictionary], copy: @escaping (String) -> String?, openManagement: @escaping () -> Void) {
         self.snapshot = snapshot; self.copySticker = copy; self.openManagement = openManagement
         NSApp.setActivationPolicy(.accessory)
+        defaults.register(defaults: ["mac.menuVisible": true])
         registerHotKey()
         updateMenu()
         if defaults.object(forKey: "mac.loginConfigured") == nil {
@@ -114,8 +147,8 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
             if let checked { item.state = checked ? .on : .off }
             menu.addItem(item)
         }
-        add("스티커 복사  \(shortcutLabel)", #selector(pick))
-        add("앱 열기", #selector(manage))
+        add("스티커 팝업  \(shortcutLabel)", #selector(pick))
+        add("설정", #selector(manage))
         menu.addItem(.separator())
         add("로그인 시 실행", #selector(toggleLogin), checked: SMAppService.mainApp.status == .enabled || SMAppService.mainApp.status == .requiresApproval)
         add("메뉴 막대 아이콘 표시", #selector(toggleMenu), checked: visible)
@@ -135,7 +168,7 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
         if let hotKey { UnregisterEventHotKey(hotKey); self.hotKey = nil }
         defer { registerHotKey(); updateMenu() }
         let alert = NSAlert()
-        alert.messageText = "스티커 복사 단축키 지정"
+        alert.messageText = "스티커 팝업 단축키 지정"
         alert.informativeText = "Command, Option, Control 중 하나를 포함한 단축키를 누르세요. Esc로 취소할 수 있어요."
         alert.addButton(withTitle: "저장")
         alert.addButton(withTitle: "취소")

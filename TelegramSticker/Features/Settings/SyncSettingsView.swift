@@ -7,7 +7,7 @@ struct SyncSettingsView: View {
             Toggle("iCloud 동기화", isOn: Binding(get: { sync.enabled && LibraryChangeJournal.cloudKitConfigured }, set: { value in
                 Task { await sync.setEnabled(value); SyncDownloadCoordinator.shared.reconcile(retryFailures: true) }
             })).disabled(!LibraryChangeJournal.cloudKitConfigured)
-            Text(sync.status).font(.footnote).foregroundStyle(.secondary)
+            if !sync.status.isEmpty { Text(sync.status).font(.footnote).foregroundStyle(.secondary) }
             if let date = sync.lastCompleted { LabeledContent("마지막 동기화", value: date.formatted(date: .abbreviated, time: .shortened)) }
             if sync.accountConfirmationRequired {
                 Button("새 Apple 계정 연결") { confirmingAccount = true }

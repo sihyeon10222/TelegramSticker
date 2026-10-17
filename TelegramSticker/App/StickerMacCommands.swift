@@ -7,8 +7,17 @@ struct StickerCommandActions {
     var copy: (() -> Void)?
     var selectAll: () -> Void
 }
+struct StickerGridZoomActions {
+    var zoomIn: () -> Void
+    var zoomOut: () -> Void
+}
+private struct StickerGridZoomKey: FocusedValueKey { typealias Value = StickerGridZoomActions }
 private struct StickerCommandsKey: FocusedValueKey { typealias Value = StickerCommandActions }
 extension FocusedValues {
+    var stickerGridZoom: StickerGridZoomActions? {
+        get { self[StickerGridZoomKey.self] }
+        set { self[StickerGridZoomKey.self] = newValue }
+    }
     var stickerCommands: StickerCommandActions? {
         get { self[StickerCommandsKey.self] }
         set { self[StickerCommandsKey.self] = newValue }
@@ -17,6 +26,7 @@ extension FocusedValues {
 
 struct StickerMacCommands: Commands {
     @FocusedValue(\.stickerCommands) private var actions
+    @FocusedValue(\.stickerGridZoom) private var gridZoom
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
             Button("설정…") { MacDesktopCoordinator.shared.showManagement() }
@@ -39,6 +49,17 @@ struct StickerMacCommands: Commands {
                     UIApplication.shared.sendAction(#selector(UIResponderStandardEditActions.selectAll(_:)), to: nil, from: nil, for: nil)
                 } else { actions?.selectAll() }
             }.keyboardShortcut("a")
+        }
+        CommandGroup(after: .toolbar) {
+            Button("스티커 확대") { gridZoom?.zoomIn() }
+                .keyboardShortcut("+", modifiers: .command)
+                .disabled(gridZoom == nil)
+            Button("스티커 확대 (=)") { gridZoom?.zoomIn() }
+                .keyboardShortcut("=", modifiers: .command)
+                .disabled(gridZoom == nil)
+            Button("스티커 축소") { gridZoom?.zoomOut() }
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(gridZoom == nil)
         }
         CommandGroup(after: .newItem) {
             Button("링크 목록 파일 열기…") { PackLinkInbox.shared.showFileImporter = true }.keyboardShortcut("o")

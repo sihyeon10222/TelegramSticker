@@ -31,8 +31,13 @@ struct LibraryView: View {
 
     // Keep bulk selection independent of detail navigation so entering edit
     // mode cannot replace the packs preselected by the share action.
-    private var listSelection: Binding<Set<String>> {
-        Binding(get: { bulkSelected }, set: { ids in
+    private var listSelection: Binding<Set<String>>? {
+        #if targetEnvironment(macCatalyst)
+        // Catalyst uses explicit toggles so an unmodified click adds to the
+        // selection instead of replacing it with the native desktop selection.
+        return nil
+        #else
+        return Binding(get: { bulkSelected }, set: { ids in
             // List can report a normal row tap as selection while inactive.
             // Only accept bulk selection after an explicit edit action or the
             // system multi-selection gesture has entered editing (.transient).
@@ -43,20 +48,36 @@ struct LibraryView: View {
                 editMode = .active
             }
         })
+        #endif
     }
 
     private func packNavigationRow(_ pack: PackManifestV1) -> some View {
         // Preserve row identity while List animates its native selection control.
         Button {
-            guard !editMode.isEditing else { return }
             #if targetEnvironment(macCatalyst)
             commandFocus = true
+            if editMode.isEditing {
+                if !bulkSelected.insert(pack.id).inserted { bulkSelected.remove(pack.id) }
+                return
+            }
+            #else
+            guard !editMode.isEditing else { return }
             #endif
             selected = pack.id
             compactColumn = .detail
         } label: {
-            packRow(pack)
-                .contentShape(Rectangle())
+            HStack(spacing: 12) {
+                #if targetEnvironment(macCatalyst)
+                if editMode.isEditing {
+                    Image(systemName: bulkSelected.contains(pack.id) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(bulkSelected.contains(pack.id) ? Color.accentColor : Color.secondary)
+                        .font(.title3)
+                        .accessibilityHidden(true)
+                }
+                #endif
+                packRow(pack)
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

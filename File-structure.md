@@ -441,3 +441,29 @@ Catalyst 시작 시 UIKit 시스템 탭과 NavigationSplitView의 네이티브 N
 2026-10-17 맥 팝업 상단 영역 제거: DesktopPlugin의 단축키 안내·설정·확대/축소 버튼이 있던 헤더와 제약을 제거하고 팩 탭부터 배치한다. 기존 배경 드래그·핀치·⌘+/⌘−는 유지한다. PickerPanel은 팝업 내부 ⌘,를 처리해 기존 showManagement 경로로 앱 설정 탭을 열고, StickerMacCommands에도 동일한 설정 메뉴 단축키를 연결한다. 기존 파일 내부 변경이며 타깃·리소스·저장 경로 변경은 없다.
 
 팝업 상단 영역 제거 완료 범위: Catalyst Release 및 연결된 iPhone Debug 빌드 성공. 맥과 iPhone 15 Pro에 기존 데이터 유지 덮어쓰기 설치·실행했고 맥 deep/strict 서명 검증을 완료했다. 자동·수동 테스트는 실행하지 않았다.
+
+2026-10-17 플랫폼별 첫 실행 안내: Features/Onboarding/OnboardingView.swift는 팩 추가·복사·붙여넣기의 세 단계와 플랫폼별 사용법을 안내한다. iPad는 나란히 열린 채팅 앱, Catalyst는 실제 설정된 복사 단축키·메뉴 막대를 안내한다. iOS 키보드 설정은 선택형 접기 영역으로 제공하고 전체 접근 확인을 시작 조건으로 요구하지 않는다. 기존 hasCompletedOnboarding을 유지한다. DesktopPlugin은 메뉴 표시 기본값 true를 등록하고 기존 최초 로그인 실행 등록을 유지하며 사용자의 저장된 설정을 덮어쓰지 않는다. 파일·타깃·리소스·라이브러리 저장 경로 변경은 없다.
+
+플랫폼별 첫 실행 안내 완료 범위: iOS Debug 및 Catalyst arm64 Release 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2와 기존 맥 앱에 데이터 유지 덮어쓰기 설치·실행 완료. 맥 deep/strict 서명 확인 완료. 자동·수동 테스트는 실행하지 않았다.
+
+
+2026-10-17 맥 팩 목록 클릭 충돌 보정: `Features/Library/LibraryView.swift`는 Catalyst 일반 모드에서 List의 선택 바인딩을 nil로 분리하여 네이티브 행 선택과 팩 열기 Button의 클릭 경합을 줄인다. 편집 모드에서만 기존 다중 선택을 연결하며 iOS 선택 동작은 유지한다. 파일·책임·타깃·리소스·저장 경로 변경은 없다. Catalyst Release와 iPhone Debug 빌드 성공. 자동·수동 테스트는 실행하지 않았다. 실제 클릭 증상 해소는 사용자 확인이 필요하다.
+
+2026-10-17 맥 편집 다중 선택·상세 키보드 확대/축소: LibraryView는 Catalyst에서 네이티브 List 선택 대신 행 Button이 bulkSelected의 해당 팩만 토글하고 체크 표시를 제공한다. 일반 클릭의 단일 선택 교체를 피하며 iOS 기본 선택은 유지한다. StickerMacCommands의 별도 scene focused value로 InstalledPackView의 열 수를 ⌘+/⌘=(확대), ⌘−(축소)로 2~10열 범위에서 한 열씩 조절한다. 기존 gridZoom 핀치 제스처는 변경하지 않았다. 컴파일러 타입 추론 한도를 피하도록 용량 계산의 경로 집합 생성을 명시적 반복문으로 풀었다. 기존 파일·타깃·리소스·저장 경계는 유지한다.
+
+다중 선택·키보드 확대/축소 빌드: Catalyst Release 및 실제 iPhone Debug 빌드 성공. 맥 앱 데이터 유지 덮어쓰기 설치·실행 및 deep/strict 서명 확인 완료. 상세 SwiftUI 구성과 용량 비동기 계산을 기존 파일 내 private 속성·함수로 분리하여 컴파일러 추론 한도를 해결했다. 자동·수동 테스트는 실행하지 않았다.
+
+
+2026-10-17 맥 GIF 파일 붙여넣기 호환: Shared/Clipboard/StickerCopyService는 Catalyst GIF 쓰기를 앱 시작 시 주입한 throwing writer에 위임한다. MacDesktopCoordinator와 DesktopBridge가 AppKit DesktopPlugin의 writeGIFToPasteboard로 연결하며 팝업·앱 상세가 같은 경로를 사용한다. DesktopPlugin은 Caches/StickerBridgeClipboard/Sticker-<UUID>.gif에 원본 데이터를 원자적으로 내보내고 하나의 NSPasteboardItem에 public.file-url·기존 NSFilenamesPboardType 파일 목록·com.compuserve.gif를 함께 게시한다. 팝업 닫기·앱 종료 후에도 파일을 유지하고 이후 GIF 복사 성공 시 7일 지난 내보내기만 정리한다. 쓰기 실패는 복사 실패로 반환한다. iOS·키보드는 기존 GIF 데이터 복사를 유지한다. 기존 파일 내부 책임 확장으로 파일·타깃·리소스·설치 라이브러리 경로 변경은 없다.
+
+맥 GIF 붙여넣기 수정 빌드·설치: Catalyst arm64 Release 및 연결된 iPhone Debug 빌드 성공. 기존 맥 앱과 iPhone 15 Pro에 데이터 유지 덮어쓰기 설치·실행했고 맥 deep/strict 서명 확인을 완료했다. 자동·수동 테스트는 실행하지 않았으며 카카오톡 실제 붙여넣기 결과는 미검증이다.
+
+
+2026-10-17 첫 실행 안내 정리: `Features/Onboarding/OnboardingView.swift`는 iPhone·iPad 키보드 사용 설명과 설정 버튼을 항상 표시한다. 접기 상태·화살표를 제거하고 iOS·Catalyst의 상단 기기 아이콘 및 시작하기 하단 영역의 재질 배경을 제거했다. 기존 파일·타깃·리소스·저장 경로는 유지한다. 앞선 선택형 접기 영역 설명을 대체한다.
+
+첫 실행 안내 정리 빌드·설치: iOS Debug와 Catalyst Release 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2와 기존 맥 앱에 데이터를 유지해 덮어쓰기 설치·실행했다. 맥 deep/strict 서명을 확인했으며 테스트·수동 UI 검증은 실행하지 않았다.
+
+
+2026-10-17 iCloud 설정 안내 정리: `Core/Sync/LibrarySyncService.swift`는 CloudKit 미설정 상태에서 개발자 팀 안내 문구 대신 빈 상태를 제공하며, `Features/Settings/SyncSettingsView.swift`는 비어 있는 상태를 표시하지 않는다. 기존 설정 동작과 동기화 데이터 경로는 유지한다. 두 기존 앱 파일 수정이며 타깃·리소스 변경은 없다.
+
+iCloud 설정 안내 정리 빌드·설치: iOS Debug와 Catalyst Release 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2 및 기존 맥 앱에 덮어쓰기 설치·실행했다. 맥 deep/strict 서명을 확인했다. 테스트는 실행하지 않았다.

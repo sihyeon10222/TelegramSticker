@@ -42,6 +42,15 @@ struct InstalledPackView: View {
         #endif
     }
 
+    #if targetEnvironment(macCatalyst)
+    private func adjustColumnsForKeyboard(by delta: Int) {
+        guard !pinching else { return }
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.32, dampingFraction: 0.86)) {
+            columnCount = min(10, max(2, columnCount + delta))
+        }
+    }
+    #endif
+
     private var gridZoom: some Gesture {
         MagnifyGesture()
             .updating($pinching) { _, pinching, _ in pinching = true }
@@ -62,7 +71,7 @@ struct InstalledPackView: View {
     }
     @Environment(\.dismiss) private var dismiss
 
-    var body: some View {
+    private var gridContent: some View {
         GeometryReader { geometry in
         let cellWidth = max(1, (geometry.size.width - 24 - CGFloat(columnCount - 1) * 4) / CGFloat(columnCount))
         ScrollView {
@@ -168,7 +177,15 @@ struct InstalledPackView: View {
         .onChange(of: geometry.size) { _, _ in selectionGestureGeneration += 1 }
         .simultaneousGesture(gridZoom)
         }
+    }
+
+    private var navigationContent: some View {
+        gridContent
         #if targetEnvironment(macCatalyst)
+        .focusedSceneValue(\.stickerGridZoom, activeTab == .library ? StickerGridZoomActions(
+            zoomIn: { adjustColumnsForKeyboard(by: -1) },
+            zoomOut: { adjustColumnsForKeyboard(by: 1) }
+        ) : nil)
         .focusable()
         .focusEffectDisabled()
         .focused($commandFocus)
@@ -220,6 +237,10 @@ struct InstalledPackView: View {
                 packOptions
             }
         }
+    }
+
+    var body: some View {
+        navigationContent
         .alert("키보드 전체 접근을 확인해 주세요", isPresented: $permissionWarning) {
             Button("설정 열기") {
                 if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
@@ -244,12 +265,23 @@ struct InstalledPackView: View {
         }
         .sheet(item: $sharedPNG) { PNGShareSheet(data: $0.data, type: $0.type).presentationDetents([.medium, .large]) }
         .task(id: pack.id + "." + pack.revision) {
+            let bytes = await loadStorageBytes()
+            guard !Task.isCancelled else { return }
+            storageBytes = bytes
+        }
+    }
+
+    private func loadStorageBytes() async -> Int64? {
             let pack = pack
-            let bytes = await Task.detached(priority: .utility) { () -> Int64? in
+            return await Task.detached(priority: .utility) { () -> Int64? in
                 guard let reader = try? LibraryReader.shared() else { return nil }
-                var paths = Set(pack.stickers.flatMap { record in
-                    [record.pngPath, record.thumbnailPath] + [record.animationPath, record.playbackPath].compactMap { $0 }
-                })
+                var paths = Set<String>()
+                for record in pack.stickers {
+                    paths.insert(record.pngPath)
+                    paths.insert(record.thumbnailPath)
+                    if let path = record.animationPath { paths.insert(path) }
+                    if let path = record.playbackPath { paths.insert(path) }
+                }
                 paths.insert("packs/\(pack.id)/\(pack.revision)/manifest.json")
                 var checkedDirectories = Set<String>()
                 var total: Int64 = 0
@@ -261,9 +293,6 @@ struct InstalledPackView: View {
                 }
                 return total
             }.value
-            guard !Task.isCancelled else { return }
-            storageBytes = bytes
-        }
     }
 
     private func toggleSelection() {

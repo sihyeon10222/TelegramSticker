@@ -4,6 +4,7 @@ import Foundation
 @objc(SBDesktopPluginProtocol)
 protocol DesktopPluginProtocol {
     func start(snapshot: @escaping () -> [NSDictionary], copy: @escaping (String) -> String?, openManagement: @escaping () -> Void)
+    func writeGIFToPasteboard(_ data: Data) throws
     func showManagement()
     func togglePicker()
     func settings() -> NSDictionary

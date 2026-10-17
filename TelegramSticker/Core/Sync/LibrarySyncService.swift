@@ -10,7 +10,7 @@ final class LibrarySyncService: CKSyncEngineDelegate {
     static let containerIdentifier = "iCloud.com.sihyeon.TelegramSticker"
     private static let zoneID = CKRecordZone.ID(zoneName: "StickerLibrary")
     var enabled = UserDefaults.standard.object(forKey: LibraryChangeJournal.enabledKey) as? Bool != false
-    private(set) var status = LibraryChangeJournal.cloudKitConfigured ? "iCloud 연결 대기 중" : "iCloud 사용에는 Apple Developer 팀 설정이 필요해요."
+    private(set) var status = LibraryChangeJournal.cloudKitConfigured ? "iCloud 연결 대기 중" : ""
     private(set) var isSyncing = false
     private(set) var changeID = 0
     private(set) var lastCompleted: Date?

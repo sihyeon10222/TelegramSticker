@@ -17,6 +17,7 @@ final class MacDesktopCoordinator {
               let plugin = type.init() as? DesktopPluginProtocol else { return }
         self.bundle = bundle
         self.plugin = plugin
+        StickerCopyService.macGIFWriter = { data in try plugin.writeGIFToPasteboard(data) }
         plugin.start(snapshot: { [weak self] in self?.snapshot() ?? [] }, copy: { [weak self] id in
             guard let sticker = self?.stickers[id] else { return "스티커 파일을 찾을 수 없어요." }
             let result = StickerCopyService().copy(sticker, isAllowed: true)
@@ -72,13 +73,13 @@ struct MacDesktopSettings: View {
             Toggle("메뉴 막대 아이콘 표시", isOn: Binding(get: { values["menu"] as? Bool ?? true }, set: {
                 MacDesktopCoordinator.shared.setMenu($0); reload()
             }))
-            Button("스티커 복사 열기") { MacDesktopCoordinator.shared.togglePicker() }
+            Button("스티커 팝업 열기") { MacDesktopCoordinator.shared.togglePicker() }
             HStack {
-                Text("스티커 복사 단축키")
+                Text("스티커 팝업 단축키")
                 Spacer()
                 Button(values["shortcut"] as? String ?? "⌥⇧S") {
                     MacDesktopCoordinator.shared.recordShortcut(); reload()
-                }.accessibilityLabel("스티커 복사 단축키 변경")
+                }.accessibilityLabel("스티커 팝업 단축키 변경")
             }
             Text("단축키를 눌러 변경할 수 있어요. Dock에 표시하지 않고 대기하며, 지정한 단축키 또는 Finder에서 앱을 열어 접근할 수 있어요.")
                 .font(.footnote).foregroundStyle(.secondary)

@@ -28,7 +28,11 @@ enum StickerCopyResult: Equatable {
 struct StickerCopyService {
     private let loadData: (URL) throws -> Data
     private let writePNG: (Data) -> Void
-    private let writeGIF: (Data) -> Void
+    private let writeGIF: @MainActor (Data) throws -> Void
+
+    #if targetEnvironment(macCatalyst)
+    static var macGIFWriter: ((Data) throws -> Void)?
+    #endif
 
     init(
         loadData: @escaping (URL) throws -> Data = {
@@ -40,8 +44,15 @@ struct StickerCopyService {
                 options: [.localOnly: true]
             )
         },
-        writeGIF: @escaping (Data) -> Void = { data in
+        writeGIF: @escaping @MainActor (Data) throws -> Void = { data in
+            #if targetEnvironment(macCatalyst)
+            guard let writer = StickerCopyService.macGIFWriter else {
+                throw CocoaError(.featureUnsupported)
+            }
+            try writer(data)
+            #else
             UIPasteboard.general.setItems([[UTType.gif.identifier: data]], options: [.localOnly: true])
+            #endif
         }
     ) {
         self.loadData = loadData
@@ -57,7 +68,7 @@ struct StickerCopyService {
         guard url.isFileURL else { return .fileUnavailable }
         guard let data = try? loadData(url) else { return .fileUnavailable }
         guard GIFValidation.isValid(data) else { return .invalidPNG }
-        writeGIF(data)
+        do { try writeGIF(data) } catch { return .fileUnavailable }
         return .copied
     }
 
