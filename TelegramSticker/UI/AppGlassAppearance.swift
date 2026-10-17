@@ -1,6 +1,16 @@
 import SwiftUI
 
 extension View {
+    /// Keep Catalyst sheets from sampling the presenting window through a second
+    /// translucent surface. Content and toolbar materials keep their own effects.
+    @ViewBuilder func appModalBackground() -> some View {
+        #if targetEnvironment(macCatalyst)
+        presentationBackground(Color(uiColor: .systemBackground))
+        #else
+        self
+        #endif
+    }
+
     /// Catalyst's iPad idiom can corrupt stretched Liquid Glass button surfaces.
     /// Keep the shared layout while using an ordinary material surface on Mac.
     @ViewBuilder func appGlassButton(prominent: Bool = false, tint: Color? = nil) -> some View {

@@ -18,6 +18,10 @@ extension FocusedValues {
 struct StickerMacCommands: Commands {
     @FocusedValue(\.stickerCommands) private var actions
     var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("설정…") { MacDesktopCoordinator.shared.showManagement() }
+                .keyboardShortcut(",")
+        }
         CommandGroup(replacing: .pasteboard) {
             Button("잘라내기") { UIApplication.shared.sendAction(#selector(UIResponderStandardEditActions.cut(_:)), to: nil, from: nil, for: nil) }
                 .keyboardShortcut("x")

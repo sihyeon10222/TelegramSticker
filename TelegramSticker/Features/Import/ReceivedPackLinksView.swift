@@ -29,5 +29,6 @@ struct ReceivedPackLinksView: View {
                     if let writer = LibraryWriter.shared { ImportView(writer: writer, initialLinks: received.links) }
                 }
         }
+        .appModalBackground()
     }
 }

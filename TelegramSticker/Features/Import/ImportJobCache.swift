@@ -102,9 +102,8 @@ actor ImportJobCache {
         activeRoots.insert(key)
         defer { activeRoots.remove(key) }
         var result = try await writer.applyOptimization(draft, progress: progress)
-        // Keep the import lease until cleanup finishes. Retain only the current
-        // comparison so the original/optimized preview remains usable after apply.
-        do { try await clearLeased(root: root, writer: writer, preserving: [draft.root]) }
+        // Keep the import lease until cleanup, including comparison files, finishes.
+        do { try await clearLeased(root: root, writer: writer, preserving: []) }
         catch { result.failures.append("용량 최적화는 반영했지만 일부 캐시 정리에 실패했어요: " + error.localizedDescription) }
         return result
     }

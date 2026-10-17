@@ -35,12 +35,12 @@ struct OptimizationView: View {
                             Divider()
                         }
                         if !draft.failures.isEmpty { Text(draft.failures.joined(separator: "\n")).font(.caption).foregroundStyle(.secondary) }
-                    } else if !model.running {
+                    } else if !model.running && !model.finished {
                         Button("비교 버전 만들기") { model.start(apply: false) }
                             .appGlassButton(prominent: true).disabled(ImportActivity.shared.count > 0).accessibilityIdentifier("prepareOptimization")
                     }
                     if let message = model.message { Text(message).accessibilityIdentifier("optimizationResult") }
-                    Text("화질별 비교 결과는 앱을 사용하는 동안 보관해요. 화면을 닫거나 품질을 바꿔도 다시 열 수 있어요. 원본 복원은 저장된 Telegram 링크에서 다시 받아 교체하며, 준비가 끝날 때까지 현재 팩을 유지해요.")
+                    Text("화질별 비교 결과는 최종 적용 전까지 보관해요. 화면을 닫거나 품질을 바꿔도 다시 열 수 있으며, 최종 적용이 끝나면 비교 파일을 포함한 캐시를 자동으로 삭제해요. 원본 복원은 저장된 Telegram 링크에서 다시 받아 교체하며, 준비가 끝날 때까지 현재 팩을 유지해요.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }.padding().frame(maxWidth: 760).frame(maxWidth: .infinity)
             }
@@ -96,6 +96,7 @@ struct OptimizationView: View {
             .onAppear { model.selectProfile() }
             .onChange(of: model.profile) { _, _ in model.selectProfile() }
         }
+        .appModalBackground()
     }
     private func bytes(_ size: Int64) -> String { ByteCountFormatter.string(fromByteCount: size, countStyle: .file) }
     private func comparison(_ sticker: Sticker, title: String, size: Int64) -> some View {

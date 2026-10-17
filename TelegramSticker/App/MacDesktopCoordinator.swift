@@ -36,10 +36,18 @@ final class MacDesktopCoordinator {
         self.library = library
         stickers.removeAll()
         return library.packs.map { pack in
+            var playback: [String: String] = [:]
+            for record in pack.stickers {
+                if let path = record.playbackPath, let url = try? library.reader?.file(path) {
+                    playback["\(pack.id).\(record.id)"] = url.path
+                }
+            }
             let items = library.stickers(in: pack).map { sticker -> NSDictionary in
                 stickers[sticker.id] = sticker
                 return ["id": sticker.id, "name": sticker.name,
-                        "thumbnail": sticker.thumbnailURL?.path ?? ""]
+                        "thumbnail": sticker.thumbnailURL?.path ?? "",
+                        "playback": playback[sticker.id] ?? "",
+                        "animation": sticker.animationURL?.path ?? ""]
             }
             return ["id": pack.id, "title": pack.title, "stickers": items]
         }
@@ -47,6 +55,7 @@ final class MacDesktopCoordinator {
     func showManagement() { plugin?.showManagement() }
     func togglePicker() { plugin?.togglePicker() }
     var settings: NSDictionary { plugin?.settings() ?? ["error": "맥 백그라운드 모듈을 불러오지 못했어요."] }
+    func recordShortcut() { plugin?.recordShortcut() }
     func setLogin(_ enabled: Bool) { plugin?.setLoginEnabled(enabled) }
     func setMenu(_ visible: Bool) { plugin?.setMenuVisible(visible) }
 }
@@ -63,8 +72,15 @@ struct MacDesktopSettings: View {
             Toggle("메뉴 막대 아이콘 표시", isOn: Binding(get: { values["menu"] as? Bool ?? true }, set: {
                 MacDesktopCoordinator.shared.setMenu($0); reload()
             }))
-            Button("스티커 복사 열기 ⌥⇧S") { MacDesktopCoordinator.shared.togglePicker() }
-            Text("Dock에 표시하지 않고 대기합니다. 아이콘을 숨겨도 ⌥⇧S 또는 Finder에서 앱을 열어 접근할 수 있어요.")
+            Button("스티커 복사 열기") { MacDesktopCoordinator.shared.togglePicker() }
+            HStack {
+                Text("스티커 복사 단축키")
+                Spacer()
+                Button(values["shortcut"] as? String ?? "⌥⇧S") {
+                    MacDesktopCoordinator.shared.recordShortcut(); reload()
+                }.accessibilityLabel("스티커 복사 단축키 변경")
+            }
+            Text("단축키를 눌러 변경할 수 있어요. Dock에 표시하지 않고 대기하며, 지정한 단축키 또는 Finder에서 앱을 열어 접근할 수 있어요.")
                 .font(.footnote).foregroundStyle(.secondary)
             if let message = values["error"] as? String, !message.isEmpty { Text(message).foregroundStyle(.orange) }
         }

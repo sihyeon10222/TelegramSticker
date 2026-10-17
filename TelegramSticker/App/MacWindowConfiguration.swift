@@ -27,6 +27,7 @@ struct MacWindowConfiguration: UIViewRepresentable {
             configureWindow()
         }
         func configureWindow() {
+            window?.windowScene?.titlebar?.titleVisibility = .hidden
             guard let restrictions = window?.windowScene?.sizeRestrictions else { return }
             let maximum = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
             if restrictions.maximumSize != maximum { restrictions.maximumSize = maximum }

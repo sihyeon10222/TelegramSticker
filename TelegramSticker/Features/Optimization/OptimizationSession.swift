@@ -101,10 +101,8 @@ final class OptimizationSession: Identifiable {
                         success = result.failures.isEmpty; finished = true; progress = success ? 1 : min(progress, 0.99)
                         ImportActivity.shared.libraryChangeID += 1
                         message = "\(result.optimizedPacks)개 팩 반영 · \(ByteCountFormatter.string(fromByteCount: result.saved, countStyle: .file)) 절약" + (result.failures.isEmpty ? "" : "\n" + result.failures.joined(separator: "\n"))
-                        // The source revisions changed; other profiles must not overwrite them.
-                        let obsolete = drafts.filter { $0.key != selectedProfile }.values.map(\.root)
-                        drafts = [selectedProfile: selectedDraft]
-                        Self.discard(obsolete)
+                        // Final application also clears the comparison files from the cache.
+                        drafts.removeAll()
                     } else {
                         let prepared = try await ImportJobCache.shared.prepareOptimization(root: jobs, writer: writer,
                             packIDs: request.packIDs, stickerIDs: request.stickerIDs, profile: selectedProfile, progress: report)

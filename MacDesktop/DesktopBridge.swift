@@ -8,5 +8,6 @@ protocol DesktopPluginProtocol {
     func togglePicker()
     func settings() -> NSDictionary
     func setLoginEnabled(_ enabled: Bool)
+    func recordShortcut()
     func setMenuVisible(_ visible: Bool)
 }

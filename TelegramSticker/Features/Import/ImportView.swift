@@ -297,5 +297,6 @@ struct ImportView: View {
                 }
             }
         }
+        .appModalBackground()
     }
 }

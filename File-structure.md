@@ -399,3 +399,45 @@ Catalyst 시작 시 UIKit 시스템 탭과 NavigationSplitView의 네이티브 N
 2026-10-17 맥 백그라운드 복사 팝업: `MacDesktop/`는 macOS 전용 `StickerBridgeDesktop.bundle` 타깃이다. `DesktopPlugin.swift`가 AppKit 메뉴 막대·accessory 실행 정책·로그인 실행(SMAppService)·Carbon 전역 ⌥⇧S·비활성 NSPanel·NSGlassEffectView·팩/최근 그리드를 관리한다. `DesktopBridge.swift`는 Foundation/Objective-C 호환 브리지 계약으로 번들과 Catalyst 앱에만 컴파일한다. 앱의 `App/MacDesktopCoordinator.swift`는 번들을 유지·로딩하고 기존 LibraryModel/LibraryReader에서 표시 데이터를 읽어 StickerCopyService로 PNG/GIF를 복사한다. 파일 경로 검증과 라이브러리 게시 경로는 기존 구현을 따른다. 설정의 MacDesktopSettings에서 로그인 실행·메뉴 막대 표시·오류를 관리하고 팝업 설정 버튼은 기존 앱의 설정 탭을 연다. Finder reopen은 관리 창을 표시하며 로그인 실행은 창을 숨긴다. Dock은 Catalyst에만 LSUIElement 및 accessory 정책으로 숨긴다.
 
 번들은 Catalyst에만 의존·임베드·서명하며 iOS 및 키보드 확장에는 포함하지 않는다. 네트워크·변환·키보드 State 코드를 macOS 번들에 연결하지 않는다. 최근 24개 ID(`mac.recentStickers`), 마지막 팩(`mac.lastPack`), 메뉴 표시(`mac.menuVisible`), 로그인 최초 구성(`mac.loginConfigured`)은 맥 프로세스 기본 UserDefaults에만 저장하며 App Group 라이브러리·iOS 데이터 경로·CloudKit 형식은 변경하지 않는다. 복사 성공만 창을 닫으며 오류는 표시한다. 창 바깥 클릭·Esc·단축키 재입력으로도 닫힌다.
+
+맥 팝업 런타임 경계 보완: Catalyst 프로세스에 로드되는 SwiftUI는 UIKit용이므로 macOS NSHostingView 심벌을 제공하지 않는다. macOS 번들에서 SwiftUI를 링크하지 않고 NSStackView/NSScrollView/NSButton 기반 AppKit 그리드와 비동기 썸네일 읽기를 사용한다. NSGlassEffectView는 유지한다. 최초 SwiftUI 호스팅 버전의 번들 로드 실패를 실행 로그에서 확인하고 제거했으며, 수정 후 설치한 앱 프로세스에서 StickerBridgeDesktop 실행 이미지 로드를 확인했다.
+
+맥 팝업 완료 범위: AppKit 전환 후 Catalyst Debug·Release 빌드 성공, Debug 앱을 `~/Applications/StickerBridge.app`에 기존 데이터 유지 덮어쓰기 설치·실행했다. 앱·번들의 deep/strict 서명 검증 성공 및 실행 프로세스의 번들 로드를 확인했다. 번들은 AppKit·Carbon·ServiceManagement를 사용하고 SwiftUI에 링크하지 않는다. iOS Debug 빌드·연결된 iPhone 15 Pro 덮어쓰기 설치·실행은 앞선 단계에서 완료했다. iOS 번들에는 StickerKeyboard.appex만 있고 macOS 번들은 없다. 자동 테스트·수동 UI 테스트·로그인 재시작 검증은 실행하지 않았다.
+
+2026-10-17 맥 스티커 팝업 이동·크기·팩 전환: `MacDesktop/DesktopPlugin.swift`의 PickerPanel은 transparent titlebar/fullSizeContentView를 사용하는 native resizable 비활성 패널이다. 상단 PickerDragHeader/배경 드래그로 이동하고 가장자리에서 크기를 조절한다(최소 360×260pt). NSWindowDelegate가 이동·크기 변경 및 닫기 시 프레임을 맥 기본 UserDefaults의 `mac.pickerFrame.v1`에 저장하고 새 팝업에서 복원한다. 연결 화면이 달라지거나 창이 화면 밖이면 사용 가능한 화면 안으로 크기·위치를 보정한다. PickerContentView는 창 너비에 맞춰 열 수를 재계산하고 그리드 문서는 위쪽부터 배치한다. PackSwipeScrollView가 가로 트랙패드/스크롤 제스처 한 번당 인접 팩으로 한 번 전환하며 최근 탭도 같은 순서에 포함한다. 세로 스크롤과 모멘텀을 분리해 연속 오전환을 막고 선택 탭을 가로 탭 줄에 노출한다. Esc도 공통 닫기 경로로 저장과 이벤트 모니터 정리를 수행한다. 파일·타깃·리소스·라이브러리 저장 경로는 변경하지 않는다.
+
+팝업 이동·크기·팩 전환 빌드·설치: Catalyst Debug 및 최종 Release 빌드 성공. 최종 Release 앱을 기존 맥 앱 위에 덮어쓰기 설치·실행하고 deep/strict 서명 검증을 완료했다. 연결된 iPhone 15 Pro도 Debug 빌드·기존 데이터 유지 설치·실행했다. 자동 테스트·수동 UI 테스트는 실행하지 않았다.
+
+
+2026-10-17 최적화 최종 적용 후 캐시 정리: `Features/Import/ImportJobCache.swift`는 적용 후 import lease를 유지한 채 기존 캐시 정리 경로로 비교 파일까지 삭제한다. `Features/Optimization/OptimizationSession.swift`는 적용 완료 후 모든 비교 참조를 비우고 `OptimizationView.swift`는 완료 상태에서 비교 생성 버튼을 숨기며 자동 삭제를 안내한다. 설치 라이브러리·설정·타깃·파일 배치는 유지한다.
+
+2026-10-17 맥 팝업 키보드 구성·재생·페이지 모션: `App/MacDesktopCoordinator.swift`는 기존 reader의 경로 검증을 거친 작은 playback GIF와 원본 animation 경로를 표시 데이터에 추가한다(복사는 기존 StickerCopyService 유지). `MacDesktop/DesktopPlugin.swift`의 상단 탭은 전체·최근 사용·팩 대표 이미지 순서이며 팩 이름은 툴팁/접근성 설명으로만 제공한다. 기본은 전체이고 이전에 선택한 탭은 유지한다. 전체는 팩별 제목과 스티커 그리드를 모아 표시한다. PickerMediaButton의 NSImageView는 보이는 스티커·팩 대표 이미지에 대해서만 playback GIF→원본 GIF→정지 썸네일 순으로 로드하고 재생한다. 스크롤 밖/창 닫기 시 작업·재생을 중지한다. UIKit/SwiftUI 및 변환 라이브러리를 macOS 번들에 연결하지 않는다.
+
+팩 페이지는 정지 화면 교체 대신 현재/이웃의 실제 PickerPageView를 viewport 안에서 이동한다. 고정된 PickerSwipeHandler가 손가락 이동량을 추적하고 임계치/취소 여부에 따라 0.24초 ease-out으로 전환 또는 복귀한다. 모멘텀은 추가 팩 전환을 일으키지 않으며 탭 클릭도 같은 방향 슬라이드를 사용한다. 시스템 동작 줄이기에서는 즉시 전환한다. 창 크기 변경 시 진행 중 전환을 취소하고 선택된 페이지를 유지한다. 기존 창 프레임 저장·Dock/메뉴 막대 정책·복사 성공 시 닫기·라이브러리 저장 경로·타깃/리소스 구성은 유지한다.
+
+
+2026-10-17 Catalyst 모달 배경 합성 보정: `UI/AppGlassAppearance.swift`의 appModalBackground는 Mac Catalyst에서만 시스템 배경색을 명시적인 불투명 presentationBackground로 지정한다. 가져오기·최적화·받은 링크·팩 공유의 NavigationStack에 적용하여 모달의 반투명 바탕과 내부 재질이 겹치는 경로를 줄인다. iOS 모달·홈 화면·버튼 스타일은 유지한다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다. 실제 사용자 환경의 글래스 깨짐 해소는 미검증이다.
+
+전체/최근/이미지 탭·GIF·페이지 모션 완료 범위: 최종 Catalyst Release 및 iPhone Debug 빌드 성공. 맥 기존 설치에 최종 앱을 덮어쓰기 설치·실행하고 deep/strict 서명과 macOS 번들 로드를 확인했다. 연결된 iPhone 15 Pro도 기존 데이터를 유지해 설치·실행했다. 자동 테스트·수동 UI/애니메이션 테스트는 실행하지 않았다.
+
+모달 배경 보정 빌드·설치: Catalyst arm64 Debug와 연결된 iPhone Debug 빌드 성공. 맥 앱 및 iPhone 15 Pro에 기존 데이터 유지 덮어쓰기 설치·실행 완료. 자동 테스트·수동 UI 검증은 실행하지 않았다.
+
+2026-10-17 맥 팝업 밀도·리사이즈·연속 전환: `MacDesktop/DesktopPlugin.swift`의 PickerPageView는 행별 NSStackView/빈 칸 제약과 팩 전체 버튼 생성을 제거한다. PickerGridDocument가 최대 약 72pt 셀·4pt 셀 간격·8pt 팩 간격·22pt 제목 영역의 좌표를 계산하고 마지막 행을 왼쪽부터 배치한다. 현재 보이는 영역과 앞뒤 한 행의 버튼/제목만 생성하고 최대 24개 재사용 버튼을 보관한다. 너비 변경 시 팩별 행 수·위치만 계산하고 화면 셀의 frame을 갱신하며, 셀 이미지도 Auto Layout 대신 고정 inset frame을 사용한다. live resize 동안 GIF 재생·신규 이미지 로딩을 보류하고 끝나면 재개한다. 이미지 파일/복사/라이브러리 경로는 유지한다.
+
+새 스와이프·팩 선택 입력은 진행 중 settlement를 완료 처리하고 이전 completion token을 무효화하여 즉시 다음 동작을 받는다. 기존의 settling 입력 차단 및 0.35초 swipe 지연을 제거하고 중복 이벤트만 짧게 걸러낸다. 스와이프 이동·복귀 모션, 동작 줄이기, 창 프레임 저장, 팩 이미지 탭과 GIF는 유지한다. 파일·타깃·리소스 경계 변경은 없다. 기존 전체 그리드/행별 스택 설명보다 이 항목을 우선한다.
+
+팝업 밀도·성능 후속 완료 범위: 최종 Catalyst Release 및 연결된 iPhone Debug 빌드 성공. 맥 앱과 iPhone 15 Pro에 기존 데이터를 유지해 덮어쓰기 설치·실행했다. 맥 설치 번들의 deep/strict 서명 검증을 완료했다. 자동 테스트·수동 UI/성능 테스트는 실행하지 않았으므로 실제 체감 리사이즈·스와이프 개선은 미검증이다.
+
+
+2026-10-17 맥 제목·단축키 설정: MacWindowConfiguration은 Catalyst 창 제목을 숨기고 DesktopPlugin은 복사 팝업 상단 앱 이름을 제거한다. DesktopPlugin의 AppKit 단축키 기록 필드와 Carbon 등록이 사용자 조합을 받으며 등록 가능한 조합만 mac.shortcutKeyCode/mac.shortcutModifiers/mac.shortcutLabel에 저장한다. DesktopBridge와 MacDesktopCoordinator의 MacDesktopSettings로 기록 창을 연결하며 메뉴·팝업도 저장된 단축키를 표시한다. 기본값은 ⌥⇧S, 실패·취소 시 이전 설정을 유지한다. 기존 타깃·리소스·라이브러리 경계는 유지한다.
+
+맥 제목·단축키 설정 완료 범위: Catalyst arm64 Release와 연결된 iPhone Debug 빌드 성공. 기존 맥 앱과 iPhone 15 Pro에 데이터 유지 덮어쓰기 설치·실행했으며 맥 앱 deep/strict 서명을 확인했다. 자동·수동 테스트는 실행하지 않았다.
+
+2026-10-17 맥 팝업 공통 배열 확대·축소: `MacDesktop/DesktopPlugin.swift`의 PickerPanel은 ⌘+/⌘= 및 ⌘−(숫자패드 포함)를 팝업 내부에서 처리하고 PickerContentView는 트랙패드 magnify와 헤더 확대·축소 버튼을 같은 공통 설정에 연결한다. PickerModel의 셀 목표 크기(36~144pt, 기본 72pt)를 `mac.pickerCellSize.v1` 맥 UserDefaults에 저장하며 전체·최근·모든 팩과 다음 팝업 열기에 동일하게 적용한다. 키보드/버튼은 1.15배 단계, 핀치는 연속 배율로 조절한다. 핀치 종료·창 닫기 때 저장하며 취소 제스처는 시작 크기로 복구한다. PickerPageView는 열 수가 바뀔 때만 geometry를 재계산하고 기존 첫 가시 스티커 위치를 보정한다. 핀치 중 GIF/새 로딩 보류 및 셀 재사용 정책을 유지한다. 셀 간격은 4→2pt, 이미지 inset은 3→1pt, 팩 간격은 8→6pt, 제목 영역은 22→20pt로 줄였다. 기존 창 프레임/단축키 설정/스와이프/복사 경로 및 타깃·리소스 경계는 유지한다.
+
+팝업 공통 배열 확대·축소 완료 범위: 최종 Catalyst Release와 실제 iPhone Debug 빌드 성공. 기존 맥 앱과 연결된 iPhone 15 Pro에 데이터 유지 덮어쓰기 설치·실행하고 맥 deep/strict 서명 검증을 완료했다. 자동 테스트·핀치/키 입력 수동 UI 테스트는 실행하지 않았다.
+
+
+2026-10-17 맥 팝업 상단 영역 제거: DesktopPlugin의 단축키 안내·설정·확대/축소 버튼이 있던 헤더와 제약을 제거하고 팩 탭부터 배치한다. 기존 배경 드래그·핀치·⌘+/⌘−는 유지한다. PickerPanel은 팝업 내부 ⌘,를 처리해 기존 showManagement 경로로 앱 설정 탭을 열고, StickerMacCommands에도 동일한 설정 메뉴 단축키를 연결한다. 기존 파일 내부 변경이며 타깃·리소스·저장 경로 변경은 없다.
+
+팝업 상단 영역 제거 완료 범위: Catalyst Release 및 연결된 iPhone Debug 빌드 성공. 맥과 iPhone 15 Pro에 기존 데이터 유지 덮어쓰기 설치·실행했고 맥 deep/strict 서명 검증을 완료했다. 자동·수동 테스트는 실행하지 않았다.

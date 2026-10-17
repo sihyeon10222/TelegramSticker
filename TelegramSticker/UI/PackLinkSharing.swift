@@ -31,6 +31,7 @@ struct PackLinksShareView: View {
             .navigationTitle("팩 공유").navigationBarTitleDisplayMode(.inline)
             .toolbar { AppModalCloseToolbar { dismiss() } }
         }
+        .appModalBackground()
     }
 }
 
