@@ -29,7 +29,7 @@ struct PackLinksShareView: View {
                 }
             }
             .navigationTitle("팩 공유").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("닫기") { dismiss() } } }
+            .toolbar { AppModalCloseToolbar { dismiss() } }
         }
     }
 }
@@ -39,9 +39,15 @@ struct PackLinksShareView: View {
 struct PackLinkShareButton: View {
     let text: String
     var disabled = false
+    #if !targetEnvironment(macCatalyst)
     @State private var anchor = ShareAnchor()
+    #endif
 
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        CatalystPackShareButton(text: text, disabled: disabled || text.isEmpty)
+            .frame(width: 36, height: 36)
+        #else
         Button { anchor.present(text: text) } label: {
             Label("Sticker Pack 링크 공유", systemImage: "square.and.arrow.up")
         }
@@ -49,8 +55,10 @@ struct PackLinkShareButton: View {
         .disabled(disabled || text.isEmpty)
         .accessibilityIdentifier("sharePackLink")
         .background { AnchorView(anchor: anchor) }
+        #endif
     }
 
+    #if !targetEnvironment(macCatalyst)
     @MainActor private final class ShareAnchor {
         weak var view: UIView?
         func present(text: String) {
@@ -77,7 +85,46 @@ struct PackLinkShareButton: View {
         }
         func updateUIView(_ view: UIView, context: Context) { anchor.view = view }
     }
+    #endif
 }
+
+#if targetEnvironment(macCatalyst)
+/// The visible UIKit control is also the popover source; no detached SwiftUI anchor.
+private struct CatalystPackShareButton: UIViewRepresentable {
+    let text: String
+    let disabled: Bool
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.tintColor = .label
+        button.setImage(UIImage(systemName: "square.and.arrow.up"), for: .normal)
+        button.accessibilityLabel = "Sticker Pack 링크 공유"
+        button.accessibilityIdentifier = "sharePackLink"
+        return button
+    }
+
+    func updateUIView(_ button: UIButton, context: Context) {
+        button.isEnabled = !disabled
+        button.removeAction(identifiedBy: UIAction.Identifier("sharePackLink"), for: .touchUpInside)
+        button.addAction(UIAction(identifier: UIAction.Identifier("sharePackLink")) { [weak button] _ in
+            guard let button, let window = button.window else { return }
+            var responder: UIResponder? = button
+            while responder != nil && !(responder is UIViewController) {
+                responder = responder?.next
+            }
+            guard let presenter = responder as? UIViewController,
+                  presenter.view.window === window else { return }
+            let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+            if let popover = activity.popoverPresentationController {
+                popover.sourceView = button
+                popover.sourceRect = button.bounds
+                popover.permittedArrowDirections = .up
+            }
+            presenter.present(activity, animated: true)
+        }, for: .touchUpInside)
+    }
+}
+#endif
 
 struct PackTextShareSheet: UIViewControllerRepresentable {
     let text: String

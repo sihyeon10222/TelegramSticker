@@ -21,9 +21,12 @@
 			</array>
 		</dict>
 	</array>
+	<key>StickerBridgeCloudKitEnabled</key>
+	<string>$(STICKERBRIDGE_CLOUDKIT_ENABLED)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>processing</string>
+		<string>remote-notification</string>
 	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>

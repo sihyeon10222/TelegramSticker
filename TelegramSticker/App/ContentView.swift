@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UIKit
 import UniformTypeIdentifiers
 
@@ -26,6 +27,7 @@ extension EnvironmentValues {
 
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = AppTab.library
     @State private var libraryHomeRequest = 0
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
@@ -36,18 +38,7 @@ struct ContentView: View {
     @State private var optimizationNotificationError = false
     @Bindable private var linkInbox = PackLinkInbox.shared
     var body: some View {
-        TabView(selection: $selectedTab) {
-            Tab("내 스티커 팩", systemImage: "square.stack", value: AppTab.library) {
-                LibraryView().environment(\.horizontalSizeClass, horizontalSizeClass)
-                    .background { TabReselectionObserver { libraryHomeRequest += 1 } }
-            }
-            Tab("갤러리", systemImage: "square.grid.2x2", value: AppTab.gallery) {
-                GalleryView().environment(\.horizontalSizeClass, horizontalSizeClass)
-            }
-            Tab("설정", systemImage: "keyboard", value: AppTab.settings) {
-                SettingsView().environment(\.horizontalSizeClass, horizontalSizeClass)
-            }
-        }
+        navigation
         // Keep iPad navigation at the bottom while retaining each screen's actual size class.
         .environment(\.horizontalSizeClass, .compact)
         .environment(\.activeAppTab, selectedTab)
@@ -67,6 +58,12 @@ struct ContentView: View {
             Button("나중에", role: .cancel) { imports.optimizationSuggestion = nil }
         } message: { Text("설치한 팩의 화질을 비교하고 저장 공간을 줄일 수 있어요.") }
         .sheet(item: $linkInbox.received) { ReceivedPackLinksView(received: $0) }
+        .fileImporter(isPresented: $linkInbox.showFileImporter, allowedContentTypes: [UTType(filenameExtension: "stickerlinks") ?? .plainText, .plainText]) { result in
+            switch result {
+            case .success(let url): Task { await linkInbox.open(url) }
+            case .failure(let error): linkInbox.error = error.localizedDescription
+            }
+        }
         .onOpenURL { url in Task { await linkInbox.open(url) } }
         .alert("링크 목록 파일 가져오기", isPresented: Binding(get: { linkInbox.error != nil }, set: { if !$0 { linkInbox.error = nil } })) {
             Button("확인", role: .cancel) { linkInbox.error = nil }
@@ -110,7 +107,44 @@ struct ContentView: View {
             optimizations.presented = session
         }
         .task { onboarding = !hasCompletedOnboarding }
-        .onChange(of: hasCompletedOnboarding) { _, complete in if !complete { onboarding = true } }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await LibrarySyncService.shared.synchronize()
+            SyncDownloadCoordinator.shared.reconcile(retryFailures: true)
+            await resumeMacImportIfNeeded()
+            // Foreground refresh also covers systems where CloudKit pushes are unavailable.
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                await LibrarySyncService.shared.synchronize()
+                SyncDownloadCoordinator.shared.reconcile()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: LibraryChangeJournal.notification).receive(on: RunLoop.main)) { _ in
+            Task { await LibrarySyncService.shared.synchronize() }
+        }
+        .onChange(of: LibrarySyncService.shared.changeID) { _, _ in SyncDownloadCoordinator.shared.reconcile() }
+        .onChange(of: hasCompletedOnboarding) { _, complete in if !complete { onboarding = true } else { Task { await resumeMacImportIfNeeded() } } }
+    }
+    private var navigation: some View {
+        TabView(selection: $selectedTab) {
+            Tab("내 스티커 팩", systemImage: "square.stack", value: AppTab.library) {
+                LibraryView().environment(\.horizontalSizeClass, horizontalSizeClass)
+                    .background { TabReselectionObserver { libraryHomeRequest += 1 } }
+            }
+            Tab("갤러리", systemImage: "square.grid.2x2", value: AppTab.gallery) {
+                GalleryView().environment(\.horizontalSizeClass, horizontalSizeClass)
+            }
+            Tab("설정", systemImage: "keyboard", value: AppTab.settings) {
+                SettingsView().environment(\.horizontalSizeClass, horizontalSizeClass)
+            }
+        }
+    }
+    private func resumeMacImportIfNeeded() async {
+        #if targetEnvironment(macCatalyst)
+        guard hasCompletedOnboarding, imports.count == 0, imports.current == nil, let writer = LibraryWriter.shared else { return }
+        let model = ImportModel(writer: writer)
+        _ = await model.resumePendingDownload()
+        #endif
     }
 }
 

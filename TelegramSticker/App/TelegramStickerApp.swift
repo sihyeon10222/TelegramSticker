@@ -9,9 +9,12 @@ import SwiftUI
 
 @main
 struct TelegramStickerApp: App {
+    @UIApplicationDelegateAdaptor(StickerAppDelegate.self) private var appDelegate
     init() {
         _ = WorkNotifications.shared
+        #if !targetEnvironment(macCatalyst)
         _ = KeyboardAccessMonitor.shared
+        #endif
         _ = GalleryPreviewState.shared
         Task { await GalleryPreviewState.shared.restoreRemaining() }
         // Capture only files left by the previous process, before any new comparison starts.
@@ -29,6 +32,16 @@ struct TelegramStickerApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                #if targetEnvironment(macCatalyst)
+                // Scene restrictions include the title bar; content must fit the remaining space.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { MacWindowConfiguration() }
+                #endif
         }
+        #if targetEnvironment(macCatalyst)
+        .defaultSize(width: 1100, height: 760)
+        .windowResizability(.automatic)
+        .commands { StickerMacCommands() }
+        #endif
     }
 }

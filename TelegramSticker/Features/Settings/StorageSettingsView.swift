@@ -18,7 +18,7 @@ struct StorageSettingsView: View {
             Spacer(minLength: 0)
             Text(ByteCountFormatter.string(fromByteCount: installed, countStyle: .file)).foregroundStyle(.secondary)
             Button("데이터 삭제", systemImage: "trash", role: .destructive) { confirmDataDelete = true }
-                .labelStyle(.iconOnly).buttonStyle(.glass).disabled(deletionDisabled || installed == 0)
+                .labelStyle(.iconOnly).appGlassButton().disabled(deletionDisabled || installed == 0)
                 .accessibilityIdentifier("deleteInstalledData")
                 .confirmationDialog("설치한 스티커 팩을 모두 삭제할까요?", isPresented: $confirmDataDelete, titleVisibility: .visible) {
                     Button("설치 데이터 삭제", role: .destructive) { deleteInstalledData() }
@@ -30,7 +30,7 @@ struct StorageSettingsView: View {
             Spacer(minLength: 0)
             Text(ByteCountFormatter.string(fromByteCount: disposable, countStyle: .file)).foregroundStyle(.secondary)
             Button("캐시 삭제", systemImage: "eraser", action: clearCache)
-                .labelStyle(.iconOnly).buttonStyle(.glass).disabled(deletionDisabled)
+                .labelStyle(.iconOnly).appGlassButton().disabled(deletionDisabled)
                 .accessibilityIdentifier("clearCache")
         }
         HStack(spacing: 12) {
@@ -41,12 +41,12 @@ struct StorageSettingsView: View {
                         .minimumScaleFactor(0.65)
                         .allowsTightening(true)
                 }
-                .buttonStyle(.glass)
+                .appGlassButton()
                 .layoutPriority(1)
             }
             Spacer(minLength: 0)
             Button("스티커 용량 최적화") { optimization = true }
-                .buttonStyle(.glass).fixedSize(horizontal: true, vertical: false)
+                .appGlassButton().fixedSize(horizontal: true, vertical: false)
                 .disabled(clearing || (installed == 0 && OptimizationCenter.shared.current == nil))
                 .accessibilityIdentifier("optimizeStorage")
         }

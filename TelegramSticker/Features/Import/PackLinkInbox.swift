@@ -10,6 +10,7 @@ final class PackLinkInbox {
     static let shared = PackLinkInbox()
     var received: ReceivedPackLinks?
     var error: String?
+    var showFileImporter = false
     var loading = false
     func open(_ url: URL) async {
         guard url.isFileURL, !loading else { return }

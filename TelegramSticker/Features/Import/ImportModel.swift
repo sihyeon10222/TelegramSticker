@@ -132,10 +132,13 @@ final class ImportModel: Identifiable {
                 var success = false
                 defer { BackgroundWork.shared.end(id: backgroundID, success: success, detail: completionDetail, cancelled: Task.isCancelled); backgroundID = nil; busy = false }
                 do {
+                    try await coordinator.saveBatch(BatchImportDraft(origin: client.configuration.origin,
+                        links: ["https://t.me/addstickers/" + pack.name], updating: updating, restoringOriginal: restoringOriginal))
                     let receipt = try await coordinator.install(pack, client: client, updating: updating, onlyIDs: onlyIDs, restoringOriginal: restoringOriginal) { value in
                         await self.updateProgress(value)
                     }
                     result = receipt; installed = receipt.failed == 0; message = receipt.message; success = receipt.failed == 0
+                    if success { try await coordinator.saveBatch(BatchImportDraft(origin: client.configuration.origin, links: [])) }
                     ImportActivity.shared.libraryChangeID += 1
                     if !updating && receipt.installed > 0 { ImportActivity.shared.suggestOptimization(packIDs: ["telegram-" + pack.name]) }
                 } catch is CancellationError { message = "중단했어요. 다시 시도하면 준비된 파일을 재사용해요." }
@@ -170,7 +173,7 @@ final class ImportModel: Identifiable {
                 var success = false
                 defer { BackgroundWork.shared.end(id: backgroundID, success: success, detail: completionDetail, cancelled: Task.isCancelled); backgroundID = nil; busy = false }
                 do {
-                    try await coordinator.saveBatch(BatchImportDraft(origin: client.configuration.origin, links: links, updating: batchUpdating))
+                    try await coordinator.saveBatch(BatchImportDraft(origin: client.configuration.origin, links: links, updating: batchUpdating, restoringOriginal: restoringOriginal))
                     let directory = try await coordinator.beginBatch(links: links, origin: client.configuration.origin, updating: batchUpdating)
                     do {
                         var seen = Set<String>()
@@ -334,6 +337,23 @@ final class ImportModel: Identifiable {
         progress = value
         downloadSummary = value.displayText
         BackgroundWork.shared.report(id: backgroundID, completed: Int64(value.installedCount), total: Int64(value.total), subtitle: downloadSummary, finalized: value.applied)
+    }
+    /// Only jobs whose download actually began are resumed; a saved preview is not an install request.
+    func resumePendingDownload() async -> Bool {
+        await configure()
+        guard let client, let draft = try? await coordinator.batchDraft(for: client.configuration.origin), !draft.links.isEmpty else { return false }
+        let links = draft.updating ? draft.links : await incompleteLinks(draft.links)
+        guard let first = links.first else { return false }
+        updating = draft.updating
+        restoringOriginal = draft.restoringOriginal == true
+        link = first; additionalLinks = links.dropFirst().map { AdditionalPackLink(value: $0) }
+        downloadBatch()
+        return busy
+    }
+    func cancelIfImporting(packIDs: Set<String>) {
+        guard busy, !packIDs.isEmpty else { return }
+        let names = Set(inputLinks.compactMap { try? StickerLink.parse($0.value) }.map { "telegram-" + $0 })
+        if !names.isDisjoint(with: packIDs) { cancel() }
     }
     func cancel() { operation?.cancel() }
 }

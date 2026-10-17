@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		1C6F0855307803AA00577D61 /* StickerKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1C6F084E307803AA00577D61 /* StickerKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		1C6F0855307803AA00577D61 /* StickerKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1C6F084E307803AA00577D61 /* StickerKeyboard.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BA2000010000000000000001 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = BA2000010000000000000002 /* Lottie */; };
 		BA2000020000000000000001 /* StickerVP9 in Frameworks */ = {isa = PBXBuildFile; productRef = BA2000020000000000000002 /* StickerVP9 */; };
 		BC3000020000000000000001 /* StickerKeyboard/State/KeyboardSelectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3000010000000000000001 /* StickerKeyboard/State/KeyboardSelectionStore.swift */; };
@@ -379,6 +379,7 @@
 		};
 		1C6F0854307803AA00577D61 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = 1C6F084D307803AA00577D61 /* StickerKeyboard */;
 			targetProxy = 1C6F0853307803AA00577D61 /* PBXContainerItemProxy */;
 		};
@@ -511,27 +512,41 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Configuration/TelegramSticker.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "$(STICKERBRIDGE_APP_ENTITLEMENTS)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = RKQCX265PQ;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Configuration/App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = StickerBridge;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_StickerBridgeCloudKitEnabled = "$(STICKERBRIDGE_CLOUDKIT_ENABLED)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIPrefersShowingLanguageSettings = NO;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sihyeon.TelegramSticker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				STICKERBRIDGE_APP_ENTITLEMENTS = Configuration/TelegramSticker.entitlements;
+				"STICKERBRIDGE_APP_ENTITLEMENTS[sdk=macosx*]" = "Configuration/TelegramSticker-Mac.entitlements";
+				STICKERBRIDGE_CLOUDKIT_ENABLED = NO;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -546,27 +561,41 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Configuration/TelegramSticker.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "$(STICKERBRIDGE_APP_ENTITLEMENTS)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = RKQCX265PQ;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Configuration/App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = StickerBridge;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_StickerBridgeCloudKitEnabled = "$(STICKERBRIDGE_CLOUDKIT_ENABLED)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIPrefersShowingLanguageSettings = NO;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sihyeon.TelegramSticker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				STICKERBRIDGE_APP_ENTITLEMENTS = Configuration/TelegramSticker.entitlements;
+				"STICKERBRIDGE_APP_ENTITLEMENTS[sdk=macosx*]" = "Configuration/TelegramSticker-Mac.entitlements";
+				STICKERBRIDGE_CLOUDKIT_ENABLED = NO;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;

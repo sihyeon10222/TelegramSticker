@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import ImageIO
 
 struct StickerLargePreview: UIViewRepresentable {
     let sticker: Sticker
@@ -24,24 +23,36 @@ struct StickerLargePreview: UIViewRepresentable {
     }
     func updateUIView(_ view: GIFPlaybackView, context: Context) {
         view.playbackPaused = paused
-        let renderingID = sticker.id + ":\(pixels)"
-        guard context.coordinator.id != renderingID else { return }
-        context.coordinator.id = renderingID
-        context.coordinator.task?.cancel()
-        view.configure(url: sticker.animationURL, poster: nil, pixels: pixels, repeatForever: true)
-        let id = renderingID, url = sticker.thumbnailURL ?? sticker.fileURL()
-        context.coordinator.task = Task { @MainActor [weak view] in
-            let image = await Task.detached { () -> CGImage? in
-                guard let url, let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-                return CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceThumbnailMaxPixelSize: pixels] as CFDictionary)
-            }.value
-            guard !Task.isCancelled, context.coordinator.id == id else { return }
-            view?.setPoster(image.map { UIImage(cgImage: $0) })
+        let coordinator = context.coordinator
+        // Include file URLs so a new installed revision cannot keep an old poster or GIF.
+        if coordinator.sticker != sticker || coordinator.pixels != pixels {
+            coordinator.task?.cancel()
+            coordinator.sticker = sticker
+            coordinator.pixels = pixels
+            coordinator.animationConfigured = false
+            view.accessibilityLabel = sticker.name
+            view.configure(url: nil, poster: coordinator.images.cachedThumbnail(for: sticker, pixels: pixels), pixels: pixels)
+            coordinator.task = Task { @MainActor [weak view] in
+                let poster = await coordinator.images.thumbnailAsync(for: sticker, pixels: pixels)
+                guard !Task.isCancelled else { return }
+                view?.setPoster(poster ?? UIImage(systemName: "exclamationmark.triangle"))
+            }
+        }
+        // Newly arriving cells need only a poster while scrolling. Keep the current
+        // frame on already configured cells and resume their timeline when idle.
+        if !paused, !coordinator.animationConfigured {
+            coordinator.animationConfigured = true
+            view.configure(url: sticker.animationURL, poster: view.image, pixels: pixels, repeatForever: true)
         }
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
-    final class Coordinator { var id: String?; var task: Task<Void, Never>? }
+    final class Coordinator {
+        let images = StickerImages()
+        var sticker: Sticker?
+        var pixels: Int?
+        var animationConfigured = false
+        var task: Task<Void, Never>?
+    }
     static func dismantleUIView(_ view: GIFPlaybackView, coordinator: Coordinator) { coordinator.task?.cancel(); view.stop() }
 }
 

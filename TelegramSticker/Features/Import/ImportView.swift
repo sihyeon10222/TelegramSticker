@@ -188,12 +188,12 @@ struct ImportView: View {
                     if initialPackName == nil {
                         HStack(spacing: 8) {
                             Button("링크 목록 파일 가져오기", systemImage: "doc.badge.plus") { explainLinkFile = true }
-                                .buttonStyle(.glass).disabled(model.busy || updating)
+                                .appGlassButton().disabled(model.busy || updating)
                                 .accessibilityIdentifier("importPackLinkFile")
                             Spacer(minLength: 0)
                             Button { model.additionalLinks.append(AdditionalPackLink()) } label: {
                                 Label("링크 추가", systemImage: "plus.circle")
-                            }.buttonStyle(.glass).disabled(model.busy || updating).accessibilityIdentifier("addPackLink")
+                            }.appGlassButton().disabled(model.busy || updating).accessibilityIdentifier("addPackLink")
                         }
                         .font(.subheadline)
                         .lineLimit(1)
@@ -201,7 +201,7 @@ struct ImportView: View {
                         if !model.additionalLinks.isEmpty || PackLinkList.split(model.link).count > 1 || !model.batchStatuses.isEmpty || model.restoringOriginal {
                             Button { focusedLink = nil; model.downloadBatch() } label: {
                                 Label(model.restoringOriginal ? "입력한 팩 원본 복원" : (updating ? "입력한 팩 모두 업데이트 확인" : "입력한 팩 모두 설치"), systemImage: "arrow.down.circle").frame(maxWidth: .infinity)
-                            }.buttonStyle(.glassProminent).controlSize(.large)
+                            }.appGlassButton(prominent: true).controlSize(.large)
                                 .disabled(model.busy || model.client == nil).accessibilityIdentifier("installBatch")
                             Text("입력한 팩을 동시에 다운로드해요. 한 팩이 실패해도 다른 팩은 계속하고, 이미 설치한 팩과 중복 링크는 건너뛰어요.")
                                 .font(.caption).foregroundStyle(.secondary)
@@ -212,7 +212,7 @@ struct ImportView: View {
                     Button { previewPack() } label: {
                         Label(model.singleUpdateName == nil ? "팩 미리보기" : "업데이트 확인", systemImage: "magnifyingglass").frame(maxWidth: .infinity)
                     }
-                        .buttonStyle(.glass).controlSize(.large)
+                        .appGlassButton().controlSize(.large)
                         .disabled(model.busy || model.client == nil).accessibilityIdentifier("previewPack")
                     }
                     if let message = model.message { Text(message).font(.subheadline).foregroundStyle(message.contains("실패") || model.failedCount > 0 ? Color.red : Color.secondary).accessibilityIdentifier("importMessage") }
@@ -226,7 +226,7 @@ struct ImportView: View {
                                 ?? (model.progress == nil ? "스티커 설치" : "다시 시도")
                             Text(title).frame(maxWidth: .infinity)
                         }
-                            .buttonStyle(.glassProminent).controlSize(.large)
+                            .appGlassButton(prominent: true).controlSize(.large)
                             .disabled(model.busy || model.installed || ImportActivity.shared.count > 0 || (!updating && pack.installableStickers.isEmpty))
                             .accessibilityIdentifier("installRemotePack")
                         if !model.failures.isEmpty {
@@ -264,7 +264,7 @@ struct ImportView: View {
             .navigationTitle(model.restoringOriginal ? "스티커 원본 복원" : (updating ? "스티커 팩 업데이트 확인" : "Telegram 팩 추가"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("닫기") { dismiss() }.accessibilityIdentifier("closeImport") }
+                AppModalCloseToolbar(accessibilityID: "closeImport") { dismiss() }
             }
             .alert("링크 목록 파일 가져오기", isPresented: $explainLinkFile) {
                 Button("파일 선택") { importLinkFile = true }

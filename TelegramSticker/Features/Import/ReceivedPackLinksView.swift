@@ -24,7 +24,7 @@ struct ReceivedPackLinksView: View {
                     }
                 }
             }.navigationTitle("받은 스티커 팩 링크")
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("닫기") { dismiss() } } }
+                .toolbar { AppModalCloseToolbar { dismiss() } }
                 .sheet(isPresented: $install) {
                     if let writer = LibraryWriter.shared { ImportView(writer: writer, initialLinks: received.links) }
                 }

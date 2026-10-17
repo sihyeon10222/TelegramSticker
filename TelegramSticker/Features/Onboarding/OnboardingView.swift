@@ -10,6 +10,20 @@ struct OnboardingView: View {
     @FocusState private var verificationFocused: Bool
 
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 24) {
+                Image(systemName: "square.stack").font(.system(size: 44)).foregroundStyle(.tint)
+                Text("맥에서 스티커를 사용하세요").font(.largeTitle.bold())
+                Label("팩 링크나 갤러리에서 스티커 팩 설치", systemImage: "1.circle")
+                Label("스티커를 선택한 뒤 복사 또는 ⌘C", systemImage: "2.circle")
+                Label("채팅창에서 ⌘V로 붙여넣기", systemImage: "3.circle")
+                Text(LibraryChangeJournal.cloudKitConfigured ? "같은 Apple 계정의 iCloud로 팩 목록과 순서를 동기화합니다. 스티커 파일은 각 기기에서 다운로드해요." : "팩은 이 맥에 저장됩니다. iCloud 동기화는 지원하는 Apple Developer 팀으로 앱을 서명한 뒤 사용할 수 있어요.").foregroundStyle(.secondary)
+                Button("시작하기", action: finish).appGlassButton(prominent: true).controlSize(.large)
+            }.padding(32).frame(maxWidth: 640)
+            .navigationTitle("StickerBridge 시작")
+        }
+        #else
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -42,7 +56,7 @@ struct OnboardingView: View {
                         guard verified else { return }
                         verificationFocused = false
                         finish()
-                    }.buttonStyle(.glassProminent)
+                    }.appGlassButton(prominent: true)
                         .controlSize(.large).disabled(!verified)
                         .accessibilityIdentifier("finishOnboarding")
                 }.padding(24).frame(maxWidth: 640, alignment: .leading).frame(maxWidth: .infinity)
@@ -59,6 +73,7 @@ struct OnboardingView: View {
                 }
             }
         }
+        #endif
     }
     private func refreshVerification() {
         // A previously confirmed permission must not be discarded just because

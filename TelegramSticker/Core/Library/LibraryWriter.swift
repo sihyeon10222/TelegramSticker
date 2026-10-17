@@ -14,14 +14,16 @@ nonisolated struct LocalStickerInput: Sendable {
 
 /// The app's only writer. Operations contain no suspension points, so publication is serialized.
 actor LibraryWriter {
-    @MainActor static let shared: LibraryWriter? = try? LibraryWriter(reader: LibraryReader.shared())
+    @MainActor static let shared: LibraryWriter? = try? LibraryWriter(reader: LibraryReader.shared(), changeJournal: LibraryChangeJournal.directory)
     let reader: LibraryReader
+    private let changeJournal: URL?
     private let publish: @Sendable (Data, URL) throws -> Void
 
-    init(reader: LibraryReader, publish: @escaping @Sendable (Data, URL) throws -> Void = {
+    init(reader: LibraryReader, changeJournal: URL? = nil, publish: @escaping @Sendable (Data, URL) throws -> Void = {
         try $0.write(to: $1, options: .atomic)
     }) {
         self.reader = reader
+        self.changeJournal = changeJournal
         self.publish = publish
     }
 
@@ -66,7 +68,7 @@ actor LibraryWriter {
 
     func install(id: String, title: String, stickers: [LocalStickerInput], originalCount: Int? = nil,
                  telegramName: String? = nil, pendingStickerIDs: [String]? = nil,
-                 replacingRevision: String? = nil, mirroringRemote: Bool = false, lastCheckedAt: Date? = nil, maximumStoredBytes: Int64? = nil) throws {
+                 replacingRevision: String? = nil, mirroringRemote: Bool = false, lastCheckedAt: Date? = nil, maximumStoredBytes: Int64? = nil, syncOrigin: Bool = false) throws {
         guard LibraryReader.safeID(id), (!stickers.isEmpty || mirroringRemote), stickers.count <= 1_000,
               !title.isEmpty, title.count <= 256,
               (stickers.count...1_000).contains(originalCount ?? stickers.count),
@@ -134,7 +136,9 @@ actor LibraryWriter {
             let reference = PackReference(id: id, manifestPath: "packs/\(id)/\(revision)/manifest.json")
             if let position { index.packs[position] = reference }
             else { index.packs.append(reference) }
-            try save(index)
+            let event: LibraryChange? = position == nil && !syncOrigin && telegramName != nil
+                ? LibraryChange(kind: .install, packID: id, telegramName: telegramName, title: title) : nil
+            try save(index, change: event)
         } catch {
             try? fm.removeItem(at: destination)
             throw error
@@ -188,18 +192,23 @@ actor LibraryWriter {
         guard let pack = try pack(id: packID), pack.revision == revision else { throw LibraryError.invalidIndex }
         guard !ids.isEmpty, ids.isSubset(of: Set(pack.stickers.map(\.id))) else { throw LibraryError.invalidIndex }
         let remaining = try inputs(for: pack).filter { !ids.contains($0.id) }
-        if remaining.isEmpty { try delete(id: packID); return }
         try install(id: pack.id, title: pack.title, stickers: remaining,
-                    originalCount: pack.originalCount, telegramName: pack.telegramName,
-                    pendingStickerIDs: pack.pendingStickerIDs, replacingRevision: revision,
+                    originalCount: remaining.count + (pack.pendingStickerIDs?.count ?? 0), telegramName: pack.telegramName,
+                    pendingStickerIDs: pack.pendingStickerIDs, replacingRevision: revision, mirroringRemote: true,
                     lastCheckedAt: pack.lastCheckedAt)
     }
 
-    func delete(id: String) throws {
+    func delete(id: String, syncOrigin: Bool = false) throws {
         var index = try reader.index()
-        guard index.packs.contains(where: { $0.id == id }) else { return }
+        guard LibraryReader.safeID(id) else { throw LibraryError.unsafePath }
+        if !index.packs.contains(where: { $0.id == id }) {
+            if !syncOrigin, id.hasPrefix("telegram-"), LibraryChangeJournal.enabled {
+                try save(index, change: LibraryChange(kind: .delete, packID: id))
+            }
+            return
+        }
         index.packs.removeAll { $0.id == id }
-        try save(index)
+        try save(index, change: syncOrigin ? nil : LibraryChange(kind: .delete, packID: id))
         // Readers holding the old revision recover from missing files by reloading their snapshot.
         if LibraryReader.safeID(id) { try? FileManager.default.removeItem(at: reader.file("packs/\(id)")) }
     }
@@ -217,17 +226,17 @@ actor LibraryWriter {
         others.insert(contentsOf: ordered, at: min(first, others.count))
         guard others.map(\.id) != index.packs.map(\.id) else { return }
         index.packs = others
-        try save(index)
+        try save(index, change: LibraryChange(kind: .order, orderedIDs: others.map(\.id)))
     }
 
-    func reorder(ids: [String]) throws {
+    func reorder(ids: [String], syncOrigin: Bool = false) throws {
         var index = try reader.index()
         guard ids.count == index.packs.count, Set(ids) == Set(index.packs.map(\.id)) else {
             throw LibraryError.invalidOrder
         }
         let references = Dictionary(uniqueKeysWithValues: index.packs.map { ($0.id, $0) })
         index.packs = ids.compactMap { references[$0] }
-        try save(index)
+        try save(index, change: syncOrigin ? nil : LibraryChange(kind: .order, orderedIDs: ids))
     }
 
     /// Only collect old unreferenced revisions when a valid existing index proves they are unused.
@@ -254,11 +263,24 @@ actor LibraryWriter {
         }
     }
 
-    private func save(_ original: LibraryIndexV1) throws {
+    func recoverChangeJournal() throws {
+        if let changeJournal { try LibraryChangeJournal.recover(directory: changeJournal, revision: reader.index().libraryRevision) }
+    }
+
+    private func save(_ original: LibraryIndexV1, change: LibraryChange? = nil) throws {
+        try recoverChangeJournal()
         var index = original
         index.libraryRevision = UUID().uuidString
         try FileManager.default.createDirectory(at: reader.root, withIntermediateDirectories: true)
-        try publish(JSONEncoder().encode(index), reader.file("index.json"))
+        var prepared: URL?
+        if let changeJournal, LibraryChangeJournal.enabled, var change {
+            change.targetRevision = index.libraryRevision
+            prepared = try LibraryChangeJournal.prepare(change, directory: changeJournal)
+        }
+        do { try publish(JSONEncoder().encode(index), reader.file("index.json")) }
+        catch { if let prepared { try? FileManager.default.removeItem(at: prepared) }; throw error }
+        // Publication succeeded. Journal finalization must never roll back or delete a published revision.
+        LibraryChangeJournal.commit(prepared)
     }
 
     private static func thumbnail(_ data: Data) throws -> Data {

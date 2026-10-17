@@ -6,6 +6,7 @@ struct InstalledPackView: View {
     @Environment(\.activeAppTab) private var activeTab
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     let landscape: Bool
     let pack: PackManifestV1
     let stickers: [Sticker]
@@ -13,8 +14,10 @@ struct InstalledPackView: View {
     let retry: () -> Void
     let optimize: (Set<String>) -> Void
     let delete: () async -> Void
-    @State private var images = StickerImages()
+    @State private var scrolling = false
     @State private var status = "두 손가락으로 확대하거나 축소할 수 있어요."
+    @FocusState private var commandFocus: Bool
+    @State private var focusedStickerID: String?
     @State private var copiedID: String?
     @State private var sharedPNG: SharedPNG?
     @State private var permissionWarning = false
@@ -29,6 +32,15 @@ struct InstalledPackView: View {
     @GestureState private var pinching = false
     @State private var suppressTapUntil = Date.distantPast
     @State private var storageBytes: Int64?
+
+    private var usesLandscapeTitle: Bool {
+        #if targetEnvironment(macCatalyst)
+        // Let the navigation bar lay out and truncate its title during live resize.
+        false
+        #else
+        landscape
+        #endif
+    }
 
     private var gridZoom: some Gesture {
         MagnifyGesture()
@@ -80,17 +92,12 @@ struct InstalledPackView: View {
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columnCount), spacing: 4) {
                     ForEach(stickers) { sticker in
-                            Group {
-                                if sticker.animationURL != nil {
-                                    StickerLargePreview(sticker: sticker)
-                                        .accessibilityHidden(true)
-                                        .allowsHitTesting(false)
-                                } else if let image = images.thumbnail(for: sticker) {
-                                    Image(uiImage: image).resizable().scaledToFit()
-                                } else { Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary) }
-                            }
+                            InstalledStickerPreview(sticker: sticker,
+                                paused: scrolling || pinching || activeTab != .library || scenePhase != .active || reduceMotion)
+                            .accessibilityHidden(true)
+                            .allowsHitTesting(false)
                             .padding(3).frame(maxWidth: .infinity).frame(height: cellWidth)
-                            .background(copiedID == sticker.id ? Color.accentColor.opacity(0.12) : Color(uiColor: .tertiarySystemFill).opacity(0.35),
+                            .background((copiedID == sticker.id || focusedStickerID == sticker.id) ? Color.accentColor.opacity(0.12) : Color(uiColor: .tertiarySystemFill).opacity(0.35),
                                         in: RoundedRectangle(cornerRadius: 10))
                             .overlay(alignment: .topTrailing) {
                                 if selecting {
@@ -107,39 +114,70 @@ struct InstalledPackView: View {
                                 }
                             }
                         .background {
-                            GeometryReader { cell in
-                                Color.clear.preference(key: StickerSelectionFrames.self,
-                                    value: [sticker.id: cell.frame(in: .named("stickerSelectionGrid"))])
+                            if selecting {
+                                GeometryReader { cell in
+                                    Color.clear.preference(key: StickerSelectionFrames.self,
+                                        value: [sticker.id: cell.frame(in: .named("stickerSelectionGrid"))])
+                                }
                             }
                         }
+                        .contentShape(Rectangle())
                         .onTapGesture {
-                            guard selecting, !pinching, Date() >= suppressTapUntil else { return }
-                            if !selectedStickers.insert(sticker.id).inserted { selectedStickers.remove(sticker.id) }
+                            guard !pinching, Date() >= suppressTapUntil else { return }
+                            #if targetEnvironment(macCatalyst)
+                            commandFocus = true
+                            focusedStickerID = sticker.id
+                            #endif
+                            if selecting {
+                                if !selectedStickers.insert(sticker.id).inserted { selectedStickers.remove(sticker.id) }
+                            } else {
+                                copy(sticker)
+                            }
                         }
                         .accessibilityLabel(sticker.animationURL == nil ? sticker.name : "\(sticker.name), 애니메이션")
-                        .accessibilityHint("길게 누르면 복사와 공유를 할 수 있어요.")
+                        .accessibilityHint(selecting ? "탭하면 선택하거나 해제해요." : "탭하면 바로 복사해요. 길게 누르거나 우클릭하면 복사와 공유 옵션을 열 수 있어요.")
+                        .accessibilityAddTraits(.isButton)
                         .accessibilityAddTraits(selecting && selectedStickers.contains(sticker.id) ? .isSelected : [])
                         .accessibilityIdentifier("installedCopy.\(sticker.id)")
                         .contextMenu {
                             Button("복사", systemImage: "doc.on.doc") { copy(sticker) }
+                            if sticker.animationURL != nil { Button("PNG로 복사", systemImage: "photo") { copy(sticker, asPNG: true) } }
                             Button("공유", systemImage: "square.and.arrow.up") { share(sticker, animated: sticker.animationURL != nil) }
                         }
                     }
                 }
                 .coordinateSpace(name: "stickerSelectionGrid")
-                .onPreferenceChange(StickerSelectionFrames.self) { stickerFrames = $0 }
+                .onPreferenceChange(StickerSelectionFrames.self) {
+                    if stickerFrames != $0 { stickerFrames = $0 }
+                }
                 .background {
+                    if selecting {
                     StickerDragSelection(active: selecting && !pinching,
                                          generation: selectionGestureGeneration,
                                          frames: stickerFrames, orderedIDs: stickers.map(\.id), selection: $selectedStickers,
                                          began: { suppressTapUntil = .distantFuture },
                                          ended: { suppressTapUntil = Date().addingTimeInterval(0.35) })
+                    }
                 }
             }.padding(.horizontal, 12).padding(.vertical, 8)
+        }
+        .onScrollPhaseChange { _, phase in
+            let active = phase != .idle
+            if scrolling != active { scrolling = active }
         }
         .onChange(of: geometry.size) { _, _ in selectionGestureGeneration += 1 }
         .simultaneousGesture(gridZoom)
         }
+        #if targetEnvironment(macCatalyst)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($commandFocus)
+        .focusedValue(\.stickerCommands, StickerCommandActions(copy: {
+            if let sticker = stickers.first(where: { $0.id == focusedStickerID }) { copy(sticker) }
+        }, selectAll: {
+            selecting = true; selectedStickers = Set(stickers.map(\.id))
+        }))
+        #endif
         .onChange(of: columnCount) { _, _ in selectionGestureGeneration += 1 }
         .onChange(of: horizontalSizeClass) { _, _ in selectionGestureGeneration += 1 }
         .onChange(of: pinching) { _, active in
@@ -155,16 +193,17 @@ struct InstalledPackView: View {
         .onChange(of: pack.id) { _, _ in
             resetSelection()
             copiedID = nil
+            focusedStickerID = nil
             storageBytes = nil
             status = "두 손가락으로 확대하거나 축소할 수 있어요."
         }
         .onChange(of: activeTab) { _, tab in
             if tab != .library { resetSelection() }
         }
-        .navigationTitle(landscape ? "" : pack.title)
+        .navigationTitle(usesLandscapeTitle ? "" : pack.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if landscape {
+            if usesLandscapeTitle {
                 ToolbarItem(placement: .principal) {
                     LandscapePackTitle(title: pack.title)
                         .accessibilityAddTraits(.isHeader)
@@ -174,7 +213,7 @@ struct InstalledPackView: View {
             ToolbarItem(id: "stickerShare", placement: .topBarTrailing) {
                 PackLinkShareButton(text: PackLinkList.links(for: [pack]).joined(separator: "\n"), disabled: selecting)
                 .background {
-                    if landscape { PackTitleBoundary(leading: false) }
+                    if usesLandscapeTitle { PackTitleBoundary(leading: false) }
                 }
             }
             ToolbarItem(id: "stickerOptions", placement: .topBarTrailing) {
@@ -187,7 +226,7 @@ struct InstalledPackView: View {
             }
             Button("확인", role: .cancel) {}
         } message: { Text("앱에서 복사는 가능하지만, 키보드에서 복사하려면 전체 접근이 필요해요. 설정 → StickerBridge → 키보드에서 허용하고 키보드를 한 번 열어 주세요.") }
-        .confirmationDialog("이 팩을 삭제할까요?", isPresented: $confirmDelete, titleVisibility: .visible) {
+        .confirmationDialog(LibrarySyncService.shared.enabled && LibraryChangeJournal.cloudKitConfigured ? "모든 기기에서 이 팩을 삭제할까요?" : "이 팩을 삭제할까요?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("팩 삭제", role: .destructive) { Task { await delete(); dismiss() } }
         }
         .confirmationDialog("선택한 \(selectedStickers.count)개 스티커를 삭제할까요?", isPresented: $confirmStickerDelete, titleVisibility: .visible) {
@@ -261,7 +300,9 @@ struct InstalledPackView: View {
     }
 
     private func copy(_ sticker: Sticker, asPNG: Bool = false) {
+        #if !targetEnvironment(macCatalyst)
         permissionWarning = KeyboardAccessReceipt.lastAllowed == nil
+        #endif
         let result = StickerCopyService().copy(sticker, isAllowed: true, asPNG: asPNG)
         if result == .copied { copiedID = sticker.id }
         status = result.message
@@ -284,4 +325,16 @@ struct InstalledPackView: View {
         confirmStickerDelete = false
     }
 
+}
+
+/// Visibility changes stay local to each cell instead of invalidating the whole pack.
+private struct InstalledStickerPreview: View {
+    let sticker: Sticker
+    let paused: Bool
+    @State private var visible = false
+
+    var body: some View {
+        StickerLargePreview(sticker: sticker, paused: paused || !visible)
+            .onScrollVisibilityChange(threshold: 0.01) { visible = $0 }
+    }
 }

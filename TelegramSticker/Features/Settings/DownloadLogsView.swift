@@ -37,7 +37,7 @@ struct DownloadLogsView: View {
                 SelectionToggleButton(active: selecting, title: "선택") { selecting.toggle(); selection.removeAll(); copied = false }
                     .disabled(operations.isEmpty)
             }
-            .sharedBackgroundVisibility(.hidden)
+            .sharedBackgroundVisibility(.visible)
             ToolbarItem(placement: .topBarTrailing) {
                 Button("비우기", role: .destructive) { store.clear(); selection.removeAll(); selecting = false }
                     .disabled(operations.isEmpty)

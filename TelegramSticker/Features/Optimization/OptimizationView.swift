@@ -37,7 +37,7 @@ struct OptimizationView: View {
                         if !draft.failures.isEmpty { Text(draft.failures.joined(separator: "\n")).font(.caption).foregroundStyle(.secondary) }
                     } else if !model.running {
                         Button("비교 버전 만들기") { model.start(apply: false) }
-                            .buttonStyle(.glassProminent).disabled(ImportActivity.shared.count > 0).accessibilityIdentifier("prepareOptimization")
+                            .appGlassButton(prominent: true).disabled(ImportActivity.shared.count > 0).accessibilityIdentifier("prepareOptimization")
                     }
                     if let message = model.message { Text(message).accessibilityIdentifier("optimizationResult") }
                     Text("화질별 비교 결과는 앱을 사용하는 동안 보관해요. 화면을 닫거나 품질을 바꿔도 다시 열 수 있어요. 원본 복원은 저장된 Telegram 링크에서 다시 받아 교체하며, 준비가 끝날 때까지 현재 팩을 유지해요.")
@@ -46,7 +46,7 @@ struct OptimizationView: View {
             }
             .accessibilityIdentifier("optimizationList")
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                GlassEffectContainer(spacing: 12) {
+                AppGlassContainer(spacing: 12) {
                     VStack(spacing: 10) {
                         if model.running || model.message != nil {
                             VStack(alignment: .leading, spacing: 8) {
@@ -56,12 +56,12 @@ struct OptimizationView: View {
                                         Text(model.applying ? "용량 최적화 버전 적용 중" : "비교 버전 만드는 중").font(.subheadline.bold())
                                         Spacer()
                                         Text("\(Int(model.progress * 100))%").monospacedDigit()
-                                        Button("중단") { model.cancel() }.buttonStyle(.glass)
+                                        Button("중단") { model.cancel() }.appGlassButton()
                                     }
                                     ProgressView(value: model.progress)
                                 } else if let message = model.message { Text(message).font(.caption).lineLimit(3) }
                             }.padding(12).frame(maxWidth: .infinity)
-                                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
+                                .appGlassPanel(cornerRadius: 20)
                         }
                         if let draft = model.draft, !draft.comparisons.isEmpty {
                             HStack(spacing: 12) {
@@ -69,11 +69,11 @@ struct OptimizationView: View {
                                 Slider(value: $model.zoom, in: 1...3).accessibilityLabel("모든 스티커 함께 확대").accessibilityIdentifier("optimizationZoom")
                                 Image(systemName: "plus.magnifyingglass")
                                 Text(String(format: "%.1f×", model.zoom)).font(.caption.monospacedDigit())
-                            }.padding(16).glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24))
+                            }.padding(16).appGlassPanel(cornerRadius: 24)
                             if !model.finished {
                                 Button { model.start(apply: true) } label: {
                                     Text("용량 최적화 버전 \(draft.comparisons.count)개 일괄 적용").frame(maxWidth: .infinity).lineLimit(1)
-                                }.buttonStyle(.glassProminent).controlSize(.large)
+                                }.appGlassButton(prominent: true).controlSize(.large)
                                     .disabled(model.running || draft.saved == 0 || ImportActivity.shared.count > 0).accessibilityIdentifier("applyOptimization")
                             }
                         }
@@ -84,14 +84,14 @@ struct OptimizationView: View {
                                         .disabled(ImportActivity.shared.count > 0)
                                 }
                                 if model.finished { Button("새 비교") { model.newComparison() } }
-                            }.font(.subheadline).buttonStyle(.glass)
+                            }.font(.subheadline).appGlassButton()
                         }
                     }
                 }.padding(.horizontal, 16).padding(.vertical, 12)
             }
             .navigationTitle("용량 최적화").navigationBarTitleDisplayMode(.inline)
             .modifier(KeyboardPermissionReminder(working: model.running))
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(model.running ? "작업 유지하고 닫기" : "닫기") { dismiss() }.accessibilityIdentifier("closeOptimization") } }
+            .toolbar { AppModalCloseToolbar(title: model.running ? "작업 유지하고 닫기" : "닫기", accessibilityID: "closeOptimization") { dismiss() } }
             .sheet(item: $model.restoreImport) { ImportView(model: $0) }
             .onAppear { model.selectProfile() }
             .onChange(of: model.profile) { _, _ in model.selectProfile() }

@@ -22,7 +22,11 @@ final class BackgroundWork {
         let kind: Kind
         let title: String
         let cancel: @MainActor () -> Void
+        #if !targetEnvironment(macCatalyst)
         var task: BGContinuedProcessingTask?
+        #else
+        var activity: NSObjectProtocol?
+        #endif
         var bridge: UIBackgroundTaskIdentifier = .invalid
         var completed: Int64 = 0
         var total: Int64 = 1
@@ -42,6 +46,11 @@ final class BackgroundWork {
         // Foreground progress and navigation must also work when the OS cannot
         // grant continued processing (including Simulator).
         jobs[identifier] = Job(kind: kind, title: title, cancel: cancel)
+        #if targetEnvironment(macCatalyst)
+        jobs[identifier]?.activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: title)
+        Task { await WorkNotifications.shared.requestAuthorizationIfNeeded() }
+        return identifier
+        #else
         let bridge = UIApplication.shared.beginBackgroundTask(withName: title) {
             Task { @MainActor in
                 guard var job = BackgroundWork.shared.jobs[identifier] else { return }
@@ -75,7 +84,9 @@ final class BackgroundWork {
             return identifier
         }
         #endif
+        #endif
     }
+    #if !targetEnvironment(macCatalyst)
     private func attach(_ task: BGContinuedProcessingTask, id: String) {
         guard var job = jobs[id] else { task.setTaskCompleted(success: false); return }
         task.expirationHandler = {
@@ -91,10 +102,11 @@ final class BackgroundWork {
         notice = nil
         report(id: id, completed: job.completed, total: job.total, subtitle: job.subtitle, finalized: job.finalized, force: true)
     }
+    #endif
     /// No work should be counted as failed merely because iOS has suspended the app
     /// before granting continued processing. Cancellation/expiration still terminates it.
     func waitForExecution() async throws {
-        #if !targetEnvironment(simulator)
+        #if !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
         while UIApplication.shared.applicationState == .background &&
             !jobs.values.contains(where: { $0.task != nil || $0.bridge != .invalid }) {
             try Task.checkCancellation()
@@ -111,21 +123,27 @@ final class BackgroundWork {
         job.subtitle = subtitle
         job.finalized = job.finalized || finalized
         jobs[id] = job
+        #if !targetEnvironment(macCatalyst)
         guard let task = job.task, force || finalized || Date().timeIntervalSince(job.lastPublished) >= 1 else { return }
         let changed = job.publishedSubtitle != subtitle
         job.lastPublished = Date(); job.publishedSubtitle = subtitle; jobs[id] = job
         task.progress.totalUnitCount = job.total * 100
         task.progress.completedUnitCount = job.finalized ? job.completed * 100 : min(job.completed * 100, job.total * 99)
         if force || changed { task.updateTitle(job.title, subtitle: subtitle) }
+        #endif
     }
     func end(id: String?, success: Bool, detail: String? = nil, cancelled: Bool = false, notificationInfo: [String: String] = [:]) {
         DownloadDiagnostics.shared.finish(success: success, summary: detail, cancelled: cancelled)
         guard let id, let job = jobs.removeValue(forKey: id) else { return }
+        #if targetEnvironment(macCatalyst)
+        if let activity = job.activity { ProcessInfo.processInfo.endActivity(activity) }
+        #else
         if job.bridge != .invalid { UIApplication.shared.endBackgroundTask(job.bridge) }
         if success { job.task?.progress.completedUnitCount = job.task?.progress.totalUnitCount ?? 1 }
         logger.info("Continued processing completed, success: \(success)")
         job.task?.setTaskCompleted(success: success)
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: id)
+        #endif
         if job.kind.sendsCompletion, !cancelled {
             WorkNotifications.shared.send(title: job.title + (success ? " 완료" : " 종료 · 확인 필요"),
                                           body: detail ?? job.subtitle, identifier: id, userInfo: success ? notificationInfo : [:])

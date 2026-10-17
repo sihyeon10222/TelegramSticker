@@ -6,10 +6,13 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                #if !targetEnvironment(macCatalyst)
                 Section("키보드") {
                     KeyboardSetupAction(kind: .add)
                     KeyboardSetupAction(kind: .fullAccess)
                 }
+                #endif
+                SyncSettingsView()
                 Section("저장 공간") { StorageSettingsView() }
                 Section("앱 초기화") { AppResetButton() }
                 Section("진단") { NavigationLink("다운로드 로그") { DownloadLogsView() } }

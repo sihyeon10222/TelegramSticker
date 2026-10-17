@@ -3,6 +3,7 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct LibraryView: View {
+    @FocusState private var commandFocus: Bool
     @State private var columnVisibility = NavigationSplitViewVisibility.automatic
     @State private var compactColumn = NavigationSplitViewColumn.sidebar
     @Environment(\.horizontalSizeClass) private var systemSizeClass
@@ -14,10 +15,11 @@ struct LibraryView: View {
     @State private var editMode = EditMode.inactive
     @State private var bulkSelected = Set<String>()
     @State private var optimizationRequest: OptimizationRequest?
-    @State private var coverImages = StickerImages()
+    @State private var sidebarScrolling = false
     @State private var confirmBulkDelete = false
     @State private var sharing = false
     @State private var sharingPack: PackManifestV1?
+    @State private var deletingPendingPack: String?
     @State private var deletingPack: PackManifestV1?
     @State private var sidebarScrolledUnderToolbar = false
     @State private var editingActionsHeight: CGFloat = 0
@@ -31,8 +33,12 @@ struct LibraryView: View {
     // mode cannot replace the packs preselected by the share action.
     private var listSelection: Binding<Set<String>> {
         Binding(get: { bulkSelected }, set: { ids in
+            // List can report a normal row tap as selection while inactive.
+            // Only accept bulk selection after an explicit edit action or the
+            // system multi-selection gesture has entered editing (.transient).
+            guard editMode.isEditing else { return }
             bulkSelected = ids
-            if !editMode.isEditing && !ids.isEmpty {
+            if editMode == .transient && !ids.isEmpty {
                 sharing = false
                 editMode = .active
             }
@@ -43,6 +49,9 @@ struct LibraryView: View {
         // Preserve row identity while List animates its native selection control.
         Button {
             guard !editMode.isEditing else { return }
+            #if targetEnvironment(macCatalyst)
+            commandFocus = true
+            #endif
             selected = pack.id
             compactColumn = .detail
         } label: {
@@ -56,19 +65,17 @@ struct LibraryView: View {
     // Resolve both orientations at the base level while retaining dark mode.
     private func listColor(_ color: UIColor) -> Color {
         Color(uiColor: UIColor { traits in
-            color.resolvedColor(with: UITraitCollection(traitsFrom: [
-                traits, UITraitCollection(userInterfaceLevel: .base)
-            ]))
+            color.resolvedColor(with: traits.modifyingTraits { $0.userInterfaceLevel = .base })
         })
     }
 
     private func packRow(_ pack: PackManifestV1) -> some View {
         HStack(spacing: 10) {
             Group {
-                if let cover = model.cover(in: pack), cover.animationURL != nil {
-                    StickerLargePreview(sticker: cover, pixels: 64, paused: activeTab != .library || scenePhase != .active).padding(3)
-                } else if let cover = model.cover(in: pack), let image = coverImages.thumbnail(for: cover) {
-                    Image(uiImage: image).resizable().scaledToFit().padding(6)
+                if let cover = model.cover(in: pack) {
+                    StickerLargePreview(sticker: cover, pixels: 64,
+                        paused: sidebarScrolling || activeTab != .library || scenePhase != .active || reduceMotion)
+                        .padding(cover.animationURL == nil ? 6 : 3)
                 } else { Image(systemName: "square.stack").foregroundStyle(.secondary) }
             }
             .frame(width: 44, height: 44)
@@ -109,7 +116,7 @@ struct LibraryView: View {
                 .disabled(ImportActivity.shared.count > 0)
             }
         }
-        .confirmationDialog("이 팩을 삭제할까요?", isPresented: Binding(
+        .confirmationDialog(LibrarySyncService.shared.enabled && LibraryChangeJournal.cloudKitConfigured ? "모든 기기에서 이 팩을 삭제할까요?" : "이 팩을 삭제할까요?", isPresented: Binding(
             get: { deletingPack?.id == pack.id }, set: { if !$0 { deletingPack = nil } }
         ), titleVisibility: .visible) {
             Button("팩 삭제", role: .destructive) {
@@ -135,8 +142,18 @@ struct LibraryView: View {
         }
     }
 
-    private func packEditingActions() -> some View {
-        GlassEffectContainer(spacing: 12) {
+    @ViewBuilder private func packEditingActions() -> some View {
+        #if targetEnvironment(macCatalyst)
+        packEditingButtons
+            .controlSize(.regular)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+        #else
+        GlassEffectContainer(spacing: 12) { packEditingButtons.controlSize(.small) }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+        #endif
+    }
+
+    private var packEditingButtons: some View {
             HStack(spacing: 8) {
                 Button {
                     let links = model.packs.filter { bulkSelected.contains($0.id) }
@@ -144,14 +161,14 @@ struct LibraryView: View {
                     importRequest = PackImportRequest(name: nil, updating: true, links: links)
                 } label: { actionLabel("업데이트 확인", icon: "arrow.clockwise") }
                 .disabled(!model.packs.contains { bulkSelected.contains($0.id) && $0.telegramName != nil } || ImportActivity.shared.count > 0)
-                .tint(.blue).accessibilityIdentifier("updateSelectedPacks")
+                .appGlassButton(prominent: true, tint: .blue).accessibilityIdentifier("updateSelectedPacks")
                 Button { optimizationRequest = OptimizationRequest(packIDs: bulkSelected) } label: { actionLabel("용량 최적화", icon: "slider.horizontal.3") }
                     .disabled(bulkSelected.isEmpty || ImportActivity.shared.count > 0)
-                    .tint(.indigo).accessibilityIdentifier("optimizeSelectedPacks")
+                    .appGlassButton(prominent: true, tint: .indigo).accessibilityIdentifier("optimizeSelectedPacks")
                 Button(role: .destructive) { confirmBulkDelete = true } label: { actionLabel("삭제", icon: "trash") }
                     .disabled(bulkSelected.isEmpty || ImportActivity.shared.count > 0)
-                    .tint(.red).accessibilityIdentifier("deleteSelectedPacks")
-                    .confirmationDialog("선택한 \(bulkSelected.count)개 팩을 삭제할까요?", isPresented: $confirmBulkDelete, titleVisibility: .visible) {
+                    .appGlassButton(prominent: true, tint: .red).accessibilityIdentifier("deleteSelectedPacks")
+                    .confirmationDialog(LibrarySyncService.shared.enabled && LibraryChangeJournal.cloudKitConfigured ? "모든 기기에서 선택한 \(bulkSelected.count)개 팩을 삭제할까요?" : "선택한 \(bulkSelected.count)개 팩을 삭제할까요?", isPresented: $confirmBulkDelete, titleVisibility: .visible) {
                         Button("선택한 팩 삭제", role: .destructive) {
                             let ids = Array(bulkSelected)
                             bulkSelected.removeAll()
@@ -160,12 +177,8 @@ struct LibraryView: View {
                     }
             }
             .font(.subheadline)
-            .buttonStyle(.glassProminent)
-            .controlSize(.small)
             .buttonBorderShape(.capsule)
             .lineLimit(1)
-        }
-        .padding(.horizontal, 8).padding(.vertical, 4)
     }
 
     private func actionLabel(_ title: String, icon: String) -> some View {
@@ -184,16 +197,46 @@ struct LibraryView: View {
 
     var body: some View {
         GeometryReader { geometry in
+        #if targetEnvironment(macCatalyst)
+        // A narrow Mac window needs one navigation column, even when UIKit's
+        // iPad idiom continues to report a regular size class.
+        let wideLayout = geometry.size.width >= 760
+        let sidebarMaximum = min(360, max(280, geometry.size.width / 3))
+        let sidebarMinimum: CGFloat = 280
+        #else
         let wideLayout = geometry.size.width >= 600 && (UIDevice.current.userInterfaceIdiom == .pad || geometry.size.width > geometry.size.height)
-        let phoneLandscapeSidebar = wideLayout && UIDevice.current.userInterfaceIdiom == .phone
         let sidebarMaximum = geometry.size.width / 3
         let sidebarMinimum = min(300, sidebarMaximum)
+        #endif
+        let phoneLandscapeSidebar = wideLayout && UIDevice.current.userInterfaceIdiom == .phone
         NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: $compactColumn) {
             List(selection: listSelection) {
                 if let message = model.message {
                     Section { Text(message).foregroundStyle(.secondary).accessibilityIdentifier("libraryMessage") }
                 }
-                if model.packs.isEmpty {
+                if !SyncDownloadCoordinator.shared.pendingPacks.isEmpty {
+                    Section("iCloud에서 받은 팩") {
+                        ForEach(SyncDownloadCoordinator.shared.pendingPacks) { pack in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(pack.title)
+                                Text(pack.status).font(.caption).foregroundStyle(pack.failed ? Color.red : Color.secondary)
+                                if pack.failed { Button("다시 시도") { SyncDownloadCoordinator.shared.reconcile(retryFailures: true) } }
+                            }
+                            .contextMenu {
+                                Button("모든 기기에서 팩 삭제", role: .destructive) { deletingPendingPack = pack.id }
+                            }
+                            .confirmationDialog("모든 기기에서 이 팩을 삭제할까요?", isPresented: Binding(
+                                get: { deletingPendingPack == pack.id }, set: { if !$0 { deletingPendingPack = nil } }
+                            ), titleVisibility: .visible) {
+                                Button("팩 삭제", role: .destructive) {
+                                    deletingPendingPack = nil
+                                    Task { await model.delete(ids: [pack.id]) }
+                                }
+                            }
+                        }
+                    }
+                }
+                if model.packs.isEmpty && SyncDownloadCoordinator.shared.pendingPacks.isEmpty {
                     Section {
                         ContentUnavailableView("설치한 팩이 없어요", systemImage: "square.stack",
                                                description: Text("+ 버튼에서 Telegram 스티커 팩 링크를 추가하세요."))
@@ -249,7 +292,7 @@ struct LibraryView: View {
                         }
                         .swipeActions(edge: .trailing) {
                             Button("삭제", systemImage: "trash", role: .destructive) {
-                                Task { await model.delete(ids: [pack.id]) }
+                                deletingPack = pack
                             }.labelStyle(.iconOnly)
                         }
                     }
@@ -262,7 +305,19 @@ struct LibraryView: View {
                 .listSectionMargins(.leading, max(20, wideLayout ? geometry.safeAreaInsets.leading : 0))
                 .listSectionMargins(.trailing, phoneLandscapeSidebar ? 8 : 20)
             }
+            #if targetEnvironment(macCatalyst)
+            .focusable()
+            .focusEffectDisabled()
+            .focused($commandFocus)
+            .focusedValue(\.stickerCommands, StickerCommandActions(selectAll: {
+                sharing = false; editMode = .active; bulkSelected = Set(model.packs.map(\.id))
+            }))
+            #endif
             .listStyle(.insetGrouped)
+            .onScrollPhaseChange { _, phase in
+                let active = phase != .idle
+                if sidebarScrolling != active { sidebarScrolling = active }
+            }
             // Keep the hard edge clear at rest and during top overscroll.
             // Normalize by the inset so the threshold survives rotation.
             .scrollEdgeEffectStyle(wideLayout ? .hard : .automatic, for: .top)
@@ -290,7 +345,7 @@ struct LibraryView: View {
                                 Label("선택한 팩 공유", systemImage: "square.and.arrow.up")
                             }
                             .disabled(links.isEmpty)
-                            .buttonStyle(.glassProminent).controlSize(.large).padding(12)
+                            .appGlassButton(prominent: true).controlSize(.large).padding(12)
                         } else { packEditingActions() }
                     }
                     .frame(height: 68)
@@ -350,13 +405,19 @@ struct LibraryView: View {
         } detail: {
             detailContent(landscape: geometry.size.width > geometry.size.height)
         }
+        #if !targetEnvironment(macCatalyst)
         .background {
             LibraryRotationObserver {
                 columnVisibility = .all
             }
         }
+        #endif
         .navigationSplitViewStyle(.balanced)
+        #if targetEnvironment(macCatalyst)
+        .environment(\.horizontalSizeClass, wideLayout ? .regular : .compact)
+        #else
         .environment(\.horizontalSizeClass, wideLayout ? .regular : systemSizeClass)
+        #endif
         .onChange(of: model.packs.map(\.id)) { _, ids in
             if let selected, !ids.contains(selected) { self.selected = nil }
             bulkSelected.formIntersection(ids)

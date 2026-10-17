@@ -1,5 +1,11 @@
 # 파일 구조와 작업 가이드
 
+2026-10-17 iPhone·iPad 사이드바 선택 버튼 흰 점 후속: `Features/Library/SelectionControls.swift`는 전 플랫폼에서 동일한 시스템 Button과 visible 툴바 공유 배경을 사용한다. iOS 전용 직접 glassEffect·고정 크기·blurReplace·transaction 보정을 제거해 사이드바 열 이동 중 버튼 내용과 글래스를 시스템 내비게이션 바가 함께 이동하도록 한다. 선택/편집과 파란 완료 체크 및 동작 줄이기 처리는 유지한다. 같은 버튼을 사용하는 `Features/Settings/DownloadLogsView.swift`도 시스템 툴바 배경을 표시한다. 앞선 iOS 커스텀 선택 글래스 전환 설명을 대체하며 파일·타깃·리소스·저장 경로 변경은 없다.
+
+위 수정은 iOS 실기기 Debug 빌드 성공 후 연결된 iPhone 15 Pro와 iPad Pro 12.9 M2에 기존 앱을 덮어쓰기 설치·실행했다. 자동 테스트와 수동 UI 검증은 실행하지 않았다.
+
+2026-10-17 설치 팩 스크롤 최적화: `UI/AnimationPreview.swift`의 StickerLargePreview는 정적·애니메이션 포스터를 기존 StickerImages/StickerThumbnailDecoder의 직렬 비동기 디코더와 메모리 캐시로 읽는다. 셀별 detached 디코딩을 제거하고 파일 URL·픽셀 크기로 revision 변경을 구분한다. `Features/Library/InstalledPackView.swift`의 상세 그리드와 LibraryView의 팩 커버는 화면 구성 중 동기 이미지 디코딩을 하지 않는다. 목록·상세 스크롤 중에는 GIF 프레임 갱신과 신규 timeline 로딩을 보류하고 정지 후 재개한다. 상세의 셀별 가시성은 같은 파일의 InstalledStickerPreview가 관리하며 일반 모드에서는 선택 좌표 측정·드래그 선택 브리지를 만들지 않는다. 한 번 탭 복사·원본 PNG/GIF·선택 모드와 확대/축소는 유지한다. 기존 앱 파일 내부 변경이며 Shared·키보드·타깃·리소스·저장 경로 변경은 없다.
+
 기준일: 2026-10-15. 아래는 적용된 실제 구조다.
 파일 추가·이동·삭제 또는 책임·타깃 변경 시 이 문서도 갱신한다.
 
@@ -30,6 +36,7 @@ TelegramSticker/                         # 저장소 루트
 │   │   ├── Library/                     # 설치 쓰기·용량 최적화·캐시·팩 링크
 │   │   ├── Background/                  # 백그라운드 작업·알림
 │   │   ├── Diagnostics/                 # 작업별 진단 로그
+│   │   ├── Sync/                        # 앱 전용 CloudKit 목록·순서·삭제 동기화
 │   │   ├── RequestGate.swift
 │   │   └── StickerImportError.swift     # 통신·변환·가져오기 공통 오류
 │   ├── UI/                              # 공통 뷰·미리보기·공유 시트
@@ -318,3 +325,50 @@ Worker 타입 검사·배포 없는 번들 검사 완료. 테스트 실행·Work
 2026-10-17 사이드바 전환 흰 점 후속: SelectionToggleButton은 glassEffectTransition(.identity)로 툴바 재부착 중 글래스의 등장·퇴장 축소 전환을 생략한다. 바깥 transaction에서 내비게이션 애니메이션을 제거한 뒤 내부 active 값 전용 애니메이션만 적용해 사이드바 열 이동이 버튼의 글래스·라벨 전환에 전달되지 않도록 한다. 선택/완료의 폭·파란 tint·blurReplace와 시스템 사이드바 토글은 유지한다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다.
 
 2026-10-17 선택 버튼 교체 철회: 사용자 요청으로 UIKit UIButton 렌더링 교체를 되돌리고 교체 직전의 SwiftUI SelectionToggleButton을 복원했다. 기존 capsule glassEffect, 선택/완료 크기·색상·blurReplace 및 glassEffectTransition(.identity)/transaction 설정을 복원하며 다른 기능은 변경하지 않는다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다.
+
+## 2026-10-17 Mac Catalyst 및 iCloud 목록 동기화
+
+- 앱 타깃은 iPhone·iPad·Mac Catalyst를 지원한다. Catalyst는 iPad idiom(Scale Interface to Match iPad), macOS 27.0 이상을 사용한다. 키보드 타깃 의존성과 확장 임베드에는 `ios` platform filter를 적용하므로 맥 번들에는 확장이 포함되지 않는다. `Shared/`의 의미와 키보드의 네트워크·변환 금지 경계는 유지한다.
+- `App/StickerAppDelegate.swift`는 CloudKit 빌드의 APNs 등록·수신을 연결한다. `App/StickerMacCommands.swift`는 맥의 포커스별 복사·전체 선택·파일 열기 명령을 제공한다. 텍스트 입력 중에는 시스템 편집 액션으로 전달한다. 맥 시작 안내는 키보드 권한을 요구하지 않는다.
+- `Core/Background/BackgroundWork.swift`는 동일한 진행·취소 API 아래 iOS continued processing과 Catalyst의 ProcessInfo activity를 분리한다. 맥의 미완료 수동 가져오기는 기존 ImportJobs draft로 재실행 시 재개한다.
+- `Core/Sync/LibraryChangeJournal.swift`는 LibraryWriter가 게시하는 목록 변경의 write-ahead journal과 기기 논리 시계를 관리한다. `LibrarySyncModels.swift`는 CloudKit 전용 팩·순서·삭제 기록과 계정별 저장 모델이다. `LibrarySyncService.swift`는 CKSyncEngine, 최초 병합, 충돌 병합, 전송 큐, 계정 변경과 상태를 관리한다. 이 영역은 기능 화면 모델을 참조하지 않는다.
+- `Features/Import/SyncDownloadCoordinator.swift`는 클라우드 목록을 기존 ImportCoordinator에 연결하고 원격 삭제·진행·취소·재시도를 담당한다. 원격 다운로드는 `syncOrigin`으로 LibraryWriter에 게시하여 재업로드하지 않는다. `Features/Settings/SyncSettingsView.swift`는 동기화 상태·계정 연결 확인·수동 재시도를 표시한다. 미다운로드 팩은 LibraryView의 별도 섹션에 표시하며 설치 전에는 공유 라이브러리 인덱스에 넣지 않는다.
+- 모든 새 Swift 파일은 기존 앱 파일 시스템 동기화 그룹에만 포함된다. 키보드는 CloudKit·가져오기·변환 패키지를 연결하지 않는다. PNG·GIF·설치 revision 및 기존 App Group 경로·원자적 게시·경로 검증을 유지한다. 개별 스티커 삭제·화질 변경은 기기별로 유지하고, 마지막 스티커를 지워도 팩 목록 삭제로 전파하지 않는다.
+- 추가 앱 전용 경로: `Application Support/LibrarySync/<account-hash>.json`(병합 메타데이터·전송 큐·엔진 상태), `clock-<account-scope>.json`(논리 시계), `Journal/<account-scope>/*.{pending,json}`(게시 전/완료 변경), `Downloads/<account-scope>/<pack-id>/`(재개 가능한 원격 다운로드). 계정 미연결 변경은 `unassigned` 범위에 보관한다. 키보드는 이 경로를 읽지 않는다.
+- 기본 서명은 개인 개발 팀에서도 설치할 수 있도록 CloudKit을 끈다. `Configuration/TelegramSticker.entitlements`는 iOS, `TelegramSticker-Mac.entitlements`는 Catalyst 기본 서명이다. 유료 개발 팀에서는 `Configuration/CloudKit.xcconfig`와 각 플랫폼의 `*-iCloud.entitlements`를 사용한다. 앱의 `STICKERBRIDGE_APP_ENTITLEMENTS`만 전환하고 키보드 서명은 기존 파일을 유지한다. CloudKit 컨테이너는 `iCloud.com.sihyeon.TelegramSticker`, private zone은 `StickerLibrary`, 레코드는 `Pack` 및 `PackOrder`이며 JSON 메타데이터를 `payload` Bytes 필드에 저장한다. 첫 배포의 iCloud 환경은 Development다.
+- 앱 초기화는 동기화를 중지한 뒤 로컬 데이터만 지운다. 전체 팩 삭제만 기기 간 전파한다. iCloud 기능 사용에는 유료 Apple Developer 팀·컨테이너·프로비저닝 구성이 필요하며 개인 팀에서는 설정에 제한을 표시한다.
+
+Catalyst 시작 시 UIKit 시스템 탭과 NavigationSplitView의 네이티브 NSToolbar 그룹이 함께 재배치되며 AppKit 제약 예외가 발생하는 것을 확인했다. 맥의 ContentView는 상단 segmented 화면 선택과 각 기능 화면을 사용하고, SelectionControls는 맥에서 기본 시스템 버튼을 사용한다. iPhone·iPad의 TabView와 선택 글래스는 유지한다. CloudKit 활성화 플래그는 App-Info.plist의 빌드 변수 치환으로 실제 번들에 포함한다.
+
+2026-10-17 완료 확인: Mac Catalyst arm64 Debug·Release 빌드 성공. Debug 앱을 `~/Applications/StickerBridge.app`에 설치하고 실행 프로세스 유지 확인. 맥 번들에 키보드 확장이 없고 샘플 PNG·TGS/WebM·Lottie 리소스와 App Group·Sandbox 서명을 포함함을 확인했다. 연결된 iPhone 15 Pro에 Debug 빌드·기존 앱 덮어쓰기 설치·실행 완료. 자동 테스트와 수동 기능 테스트는 실행하지 않았다. 개인 개발 팀의 iCloud/Push Notifications 서명 거절 때문에 실제 iCloud 연결·기기 간 동기화는 미확인 및 비활성화 상태다. CloudKit xcconfig의 앱 서명 전환과 키보드의 기존 서명 유지, 기본 번들의 CloudKit 플래그 NO를 확인했다.
+
+
+2026-10-17 맥 UI를 iPad와 통일: 앞선 Mac idiom·상단 segmented 화면 선택·맥 전용 선택 버튼 설명을 대체한다. 앱의 TARGETED_DEVICE_FAMILY에서 6을 제거해 Catalyst를 iPad idiom으로 실행한다. ContentView는 전 플랫폼에서 동일한 TabView와 하단 배치용 compact 환경을 사용하고 각 탭 내용에는 실제 size class를 전달한다. SelectionControls의 맥 전용 기본 버튼과 상세의 맥 전용 복사 툴바를 제거해 iPad의 글래스 선택·공유·옵션 배치를 그대로 사용한다. LibraryView의 제목·가로 상세·사이드바 크기 및 방향 관찰도 공통 경로를 사용한다. 맥의 키보드 명령 포커스는 유지하되 별도 포커스 외곽선은 표시하지 않는다. 파일 이동·리소스·저장 형식 변경은 없다.
+
+2026-10-17 iPad 배치 통일 완료 확인: Catalyst arm64 Debug·Release 및 연결된 iPhone Debug 빌드 성공. 맥 번들의 UIDeviceFamily가 [2]인 iPad UI 모드임을 확인하고 기존 맥 앱 위에 설치·실행했다. 연결된 iPhone 15 Pro에도 기존 앱을 덮어쓰기 설치·실행했다. 자동 테스트·수동 UI 테스트는 실행하지 않았다.
+
+
+2026-10-17 Catalyst 창 크기·레이아웃 후속: `App/MacWindowConfiguration.swift`는 앱 타깃 전용 UIViewRepresentable로 실제 UIWindowScene의 최소 크기 640×480pt·무제한 최대 크기·전체 화면 허용을 설정한다. TelegramStickerApp은 확장 가능한 콘텐츠 frame과 windowResizability(.contentMinSize)를 사용한다. 맥의 LibraryView는 창 폭 760pt 이상에서 두 열을 사용하고 사이드바 폭을 280~360pt로 제한하며 그보다 좁으면 compact 탐색으로 접는다. 맥에서는 창 비율 변경을 기기 회전으로 처리하지 않는다. 상세 제목은 iPad와 같은 상단 내비게이션 위치에 두되 맥의 live resize 중에는 시스템 navigationTitle의 말줄임을 사용하고 별도 UILabel 재부착·CADisplayLink 경계 측정을 사용하지 않는다. iPhone·iPad의 기존 배치·회전·제목 동작은 유지한다. 새 파일은 기존 앱 동기화 그룹에만 포함되고 키보드·리소스·저장소 변경은 없다.
+
+
+리퀴드 글래스 버튼 후속: 사용자 확인에 따라 Catalyst의 SelectionToggleButton은 직접 glassEffect·고정 frame·blurReplace·폭 애니메이션을 사용하지 않고 시스템 glass/glassProminent 버튼 스타일로 동일 위치의 편집/선택·완료를 표시한다. 맥의 하단 팩 편집 버튼은 공통 액션 HStack을 사용하되 GlassEffectContainer의 합성·모핑 없이 각각 시스템 글래스로 렌더링하고 regular 크기를 사용한다. iPhone·iPad는 기존 글래스 효과·전환·컨테이너·small 크기를 유지한다. 파일·타깃·저장소 변경은 없다.
+
+2026-10-17 창 크기·글래스 후속 완료 확인: Catalyst arm64 Debug·Release 및 연결된 iPhone Debug 빌드 성공. 맥 앱을 기존 위치에 덮어쓰기 설치·실행했고 연결된 iPhone 15 Pro도 기존 데이터 유지 설치·실행했다. MacWindowConfiguration은 앱 동기화 그룹으로 컴파일되며 키보드에는 포함되지 않는다. 자동 테스트·창 드래그·버튼 외형 수동 검증은 실행하지 않았다.
+
+
+2026-10-17 스크린샷 기반 글래스 버튼 수정: 앞선 Catalyst glass/glassProminent 스타일 전환만으로는 가져오기 화면의 넓은 버튼 표면 깨짐이 남았고, 툴바 배경 hidden 설정 때문에 편집/선택은 글자만 표시됨을 사용자 스크린샷에서 확인했다. `UI/AppGlassAppearance.swift`는 앱 공통 버튼·패널·컨테이너의 플랫폼 경계다. iOS는 기존 Liquid Glass API를 사용하고, Catalyst 콘텐츠 버튼은 regularMaterial 캡슐·고정 선 테두리·강조 tint 및 명시적인 비활성/눌림 상태로 그린다. Catalyst에서 콘텐츠 버튼·패널의 glass shader와 컨테이너 모핑을 사용하지 않는다. 가져오기·갤러리·온보딩·저장 공간·최적화·현재 작업 배너·하단 팩 작업에 공통 경로를 적용한다. SelectionControls와 로그 선택 툴바는 Catalyst에서 sharedBackgroundVisibility(.visible)와 기본 시스템 Button을 사용해 시스템 글래스 캡슐을 복원한다. iPhone·iPad의 기존 툴바 background hidden과 커스텀 선택 전환은 유지한다. 새 파일은 기존 앱 동기화 그룹에만 포함되며 키보드·백엔드·리소스·데이터 경로 변경은 없다.
+
+2026-10-17 스크린샷 후속 빌드·설치: Catalyst arm64 Debug·Release와 연결된 iPhone Debug 빌드 성공. 맥 앱 및 연결된 iPhone 15 Pro를 기존 데이터 유지 방식으로 덮어쓰기 설치·실행했다. 새 AppGlassAppearance는 앱 타깃으로 컴파일되며 키보드에는 포함되지 않는다. 자동 테스트와 수동 UI 테스트는 실행하지 않았다.
+
+
+2026-10-17 모달 닫기·상세 공유 후속: `UI/AppGlassAppearance.swift`의 AppModalCloseToolbar는 가져오기·최적화·받은 링크·팩 공유 모달의 cancellationAction을 공통 처리한다. Catalyst는 해당 버튼의 시스템 툴바 배경만 숨기고 기존 CatalystMaterialButtonStyle로 반투명 캡슐을 직접 표시하며, iOS는 기존 기본 ToolbarItem/Button을 유지한다. `UI/PackLinkSharing.swift`의 PackLinkShareButton은 Catalyst에서 ShareLink를 직접 사용하여 SwiftUI가 실제 툴바 공유 앵커를 관리한다. Catalyst에서 네이티브 툴바로 추출된 버튼의 background UIView가 미부착 상태일 때 이전 ShareAnchor의 guard가 조용히 반환하던 경로를 제거한다. iPhone·iPad의 실제 공유 버튼 popover 앵커는 기존 구현을 유지한다. 기존 앱 타깃 내부 책임 변경이며 파일 이동·타깃·리소스·저장소 변경은 없다.
+
+2026-10-17 모달 닫기·상세 공유 빌드·설치: Catalyst arm64 Debug와 연결된 iPhone Debug 빌드 성공. 맥 앱 및 연결된 iPhone 15 Pro에 기존 앱을 덮어쓰기 설치하고 실행했다. iPhone 첫 실행 요청은 LaunchServicesDataMismatch로 거부되었으나 재요청으로 실행 성공했다. 자동 테스트·수동 UI 및 공유 동작 테스트는 실행하지 않았다.
+
+2026-10-17 Catalyst 상세 공유 위치 후속: UI/PackLinkSharing.swift의 맥 상세 공유 버튼은 실제 UIButton을 UIViewRepresentable로 툴바에 배치하고 동일 버튼의 bounds를 UIActivityViewController popover sourceView/sourceRect로 사용한다. ShareLink가 창 하단을 기준으로 표시하던 경로를 대체하며 공유창은 버튼 아래에 표시하도록 화살표 방향을 지정한다. iOS 공유 경로·파일·타깃·저장소 변경은 없다.
+
+2026-10-17 상세 공유 위치 빌드·설치: Catalyst arm64 Debug 및 연결된 iPhone Debug 빌드 성공. 맥 앱과 iPhone 15 Pro에 기존 데이터를 유지해 덮어쓰기 설치·실행했다. 자동 테스트와 공유창 위치 수동 테스트는 실행하지 않았다.
+
+2026-10-17 Catalyst 최소 창 탭바 잘림 수정: App/TelegramStickerApp.swift는 콘텐츠에 창 최소 높이 480pt를 중복 강제하지 않고 실제 제안 크기에 맞춘다. 창 최소 640×480은 기존 MacWindowConfiguration의 UIWindowScene sizeRestrictions에서 유지하고 SwiftUI windowResizability는 automatic으로 둔다. 제목 표시줄만큼 콘텐츠가 창 아래로 넘치는 것을 방지하며 탭바 디자인·iOS 동작·타깃·파일·저장소 변경은 없다.
+
+2026-10-17 최소 창 탭바 수정 빌드·설치: Catalyst arm64 Debug와 연결된 iPhone Debug 빌드 성공. 맥 및 iPhone 15 Pro에 기존 데이터 유지 덮어쓰기 설치·실행 완료. 자동 테스트·창 크기 변경 수동 테스트는 실행하지 않았다.

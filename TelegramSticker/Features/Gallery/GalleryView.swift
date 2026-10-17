@@ -107,7 +107,7 @@ struct GalleryView: View {
 
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.glassProminent).controlSize(.large)
+                        .appGlassButton(prominent: true).controlSize(.large)
                         .disabled(selected.isEmpty || ImportActivity.shared.count > 0 || LibraryWriter.shared == nil)
                         .padding(.horizontal, 16).padding(.vertical, 8)
                     }

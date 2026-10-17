@@ -5,6 +5,7 @@ nonisolated struct BatchImportDraft: Codable, Sendable {
     let origin: URL
     let links: [String]
     var updating = false
+    var restoringOriginal: Bool? = nil
 }
 nonisolated struct ImportDraft: Codable, Sendable {
     let origin: URL
@@ -30,12 +31,14 @@ nonisolated struct ImportResult: Sendable {
 }
 
 actor ImportCoordinator {
+    private let syncOrigin: Bool
     private let writer: LibraryWriter
     private let converter = StaticImageConverter()
     private static let conversionGate = RequestGate(limit: 1)
     private static let pipelineGate = RequestGate(limit: 8)
     private let root: URL
-    init(writer: LibraryWriter, root: URL? = nil) {
+    init(writer: LibraryWriter, root: URL? = nil, syncOrigin: Bool = false) {
+        self.syncOrigin = syncOrigin
         self.writer = writer
         self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ImportJobs", isDirectory: true)
@@ -285,7 +288,7 @@ actor ImportCoordinator {
             let retained = updating ? [] : oldInputs.filter { available[$0.id] != nil }
             try await writer.install(id: "telegram-" + pack.name, title: pack.title, stickers: ordered + retained,
                 originalCount: total, telegramName: pack.name, pendingStickerIDs: pending, replacingRevision: existing?.revision, mirroringRemote: updating,
-                lastCheckedAt: updating ? pack.fetchedAt.map { Date(timeIntervalSince1970: $0) } : existing?.lastCheckedAt)
+                lastCheckedAt: updating ? pack.fetchedAt.map { Date(timeIntervalSince1970: $0) } : existing?.lastCheckedAt, syncOrigin: syncOrigin)
         } else if let existing {
             guard try await writer.pack(id: existing.id)?.revision == existing.revision else { throw LibraryError.invalidOrder }
         }

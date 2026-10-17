@@ -25,7 +25,7 @@ struct KeyboardSettingsButton: View {
             }
             .fixedSize(horizontal: true, vertical: false)
         }
-        .buttonStyle(.glass)
+        .appGlassButton()
             .alert("설정에서 직접 이동해 주세요", isPresented: $failedToOpen) {
                 Button("확인", role: .cancel) {}
             } message: {

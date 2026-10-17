@@ -1,0 +1,5 @@
+// Apply to builds signed by a paid Apple Developer team with the shared iCloud container.
+// Only the app target consumes STICKERBRIDGE_APP_ENTITLEMENTS. The keyboard keeps its own entitlements.
+STICKERBRIDGE_CLOUDKIT_ENABLED = YES
+STICKERBRIDGE_APP_ENTITLEMENTS = Configuration/TelegramSticker-iCloud.entitlements
+STICKERBRIDGE_APP_ENTITLEMENTS[sdk=macosx*] = Configuration/TelegramSticker-Mac-iCloud.entitlements

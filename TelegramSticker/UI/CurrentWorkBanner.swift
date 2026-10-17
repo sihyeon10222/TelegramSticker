@@ -30,10 +30,10 @@ struct CurrentWorkBanner: View {
                 .accessibilityLabel("진행 중인 작업 열기")
                 .accessibilityIdentifier("backgroundWorkDetails")
                 Button("중단") { BackgroundWork.shared.cancelCurrent() }
-                    .buttonStyle(.glass).font(.caption)
+                    .appGlassButton().font(.caption)
             }
             .padding(12)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
+            .appGlassPanel(cornerRadius: 20)
             .padding(.horizontal, 12).padding(.bottom, 6)
         }
     }
