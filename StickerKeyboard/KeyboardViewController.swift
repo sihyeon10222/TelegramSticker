@@ -28,7 +28,7 @@ final class KeyboardViewController: UIInputViewController,
     let nextKeyboardButton = UIButton(type: .system)
     let moreButton = UIButton(type: .system)
     let gridViewport = UIView()
-    let pagingPreview = UICollectionView(frame: .zero, collectionViewLayout: StickerGridLayout())
+    var pagingPreview = UICollectionView(frame: .zero, collectionViewLayout: StickerGridLayout())
     var visibleSections: [[Sticker]] = []
     var pagingSections: [[Sticker]] = []
     var pagingTarget: Selection?
@@ -39,8 +39,9 @@ final class KeyboardViewController: UIInputViewController,
     var lastTabViewportWidth: CGFloat = 0
     var moreWidth: NSLayoutConstraint?
     let outerInset: CGFloat = 4
+    var pendingScrollRestoration = false
     var committingPage = false
-    let collectionView = UICollectionView(frame: .zero,
+    var collectionView = UICollectionView(frame: .zero,
                                                   collectionViewLayout: StickerGridLayout())
     var previousFullAccess: Bool?
     var resetStatusTask: Task<Void, Never>?
@@ -180,6 +181,13 @@ final class KeyboardViewController: UIInputViewController,
         pagingPreview.contentInsetAdjustmentBehavior = .never
         pagingPreview.contentInset = collectionView.contentInset
         pagingPreview.register(StickerCell.self, forCellWithReuseIdentifier: StickerCell.reuseID)
+        pagingPreview.alwaysBounceVertical = true
+        pagingPreview.delaysContentTouches = false
+        pagingPreview.canCancelContentTouches = true
+        pagingPreview.isDirectionalLockEnabled = false
+        pagingPreview.alwaysBounceHorizontal = false
+        pagingPreview.bouncesHorizontally = false
+        pagingPreview.panGestureRecognizer.require(toFail: packSwipe)
         pagingPreview.isHidden = true
         for grid in [collectionView, pagingPreview] {
             grid.translatesAutoresizingMaskIntoConstraints = false
@@ -245,15 +253,16 @@ final class KeyboardViewController: UIInputViewController,
             let libraryChanged = restoreInitialLibrary()
             if !libraryChanged {
                 if preferencesChanged { state.restorePackOrder() }
-                prewarmFirstFrame()
                 if preferencesChanged { applySelection() }
             }
-            collectionView.setContentOffset(.zero, animated: false)
+            pendingScrollRestoration = true
             refreshPermission(resetStatus: true)
             collectionView.visibleCells.forEach { $0.isHighlighted = false }
             packTabs.arrangedSubviews.compactMap { $0 as? UIButton }.forEach { $0.isHighlighted = false }
             view.layoutIfNeeded()
             collectionView.layoutIfNeeded()
+            restoreScrollPositionIfNeeded()
+            prepareVisiblePosters()
         }
         playbackSuspended = false
         updatePlaybackState()
@@ -270,7 +279,16 @@ final class KeyboardViewController: UIInputViewController,
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        restoreScrollPositionIfNeeded()
         revealSelectedTabIfNeeded()
+    }
+
+    func restoreScrollPositionIfNeeded() {
+        guard pendingScrollRestoration, collectionView.bounds.height > 0, collectionView.bounds.width > 0 else { return }
+        pendingScrollRestoration = false
+        collectionView.layoutIfNeeded()
+        let maximum = max(0, collectionView.contentSize.height - collectionView.bounds.height)
+        collectionView.setContentOffset(CGPoint(x: 0, y: min(CGFloat(state.scrollOffset(for: state.selection)), maximum)), animated: false)
     }
 
     func revealSelectedTabIfNeeded() {
@@ -315,6 +333,8 @@ final class KeyboardViewController: UIInputViewController,
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        cancelPaging()
+        state.saveScrollOffset(Double(collectionView.contentOffset.y))
         presentationActive = false
         loadGeneration += 1
         playbackSuspended = true

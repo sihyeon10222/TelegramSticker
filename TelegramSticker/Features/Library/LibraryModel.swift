@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 @MainActor @Observable
 final class LibraryModel {
     @ObservationIgnored private var stickerCache: [String: [Sticker]] = [:]
+    @ObservationIgnored private var refreshGeneration = 0
     @ObservationIgnored private var coverCache: [String: Sticker] = [:]
     var packs: [PackManifestV1] = []
     var damagedPacks: [PackReference] = []
@@ -31,15 +32,21 @@ final class LibraryModel {
 
     func refresh() async {
         guard let reader else { return }
+        refreshGeneration += 1
+        let generation = refreshGeneration
         do {
             let (snapshot, references) = try await Task.detached { (try reader.snapshot(resolvingFiles: false), try reader.index().packs) }.value
+            guard !Task.isCancelled, generation == refreshGeneration else { return }
             packs = snapshot.packs
             let revisions = Set(packs.map { $0.id + "." + $0.revision })
             stickerCache = stickerCache.filter { revisions.contains($0.key) }
             coverCache = coverCache.filter { revisions.contains($0.key) }
             damagedPacks = references.filter { reference in !snapshot.packs.contains { $0.id == reference.id } }
             message = snapshot.warnings.first
-        } catch { message = error.localizedDescription }
+        } catch {
+            guard !Task.isCancelled, generation == refreshGeneration else { return }
+            message = error.localizedDescription
+        }
     }
 
     func start() async {

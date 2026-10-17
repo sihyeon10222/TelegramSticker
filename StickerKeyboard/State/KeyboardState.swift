@@ -17,10 +17,35 @@ final class KeyboardState {
     private let selectionStore = KeyboardSelectionStore()
     private let recent = RecentStickerStore()
     private let packOrder = KeyboardPackOrderStore()
+    private static var imageCacheGeneration: String?
     private static var cachedLibrary: (LibraryReader, LibrarySnapshot)?
 
     private(set) var stickers: [Sticker] = []
     var hasRecentStickers: Bool { !recent.ids.isEmpty }
+
+    func shouldInvalidateImageCache(for generation: String?) -> Bool {
+        let previous = Self.imageCacheGeneration
+        Self.imageCacheGeneration = generation
+        return previous != nil && previous != generation
+    }
+
+    private func scrollKey(for selection: KeyboardSelection) -> String {
+        switch selection {
+        case .all: return "keyboard.scroll.v1.all"
+        case .recent: return "keyboard.scroll.v1.recent"
+        case .pack(let id): return "keyboard.scroll.v1.pack." + id
+        }
+    }
+
+    func saveScrollOffset(_ offset: Double) {
+        guard offset.isFinite else { return }
+        UserDefaults.standard.set(max(0, offset), forKey: scrollKey(for: selection))
+    }
+
+    func scrollOffset(for selection: KeyboardSelection) -> Double {
+        let value = UserDefaults.standard.double(forKey: scrollKey(for: selection))
+        return value.isFinite ? max(0, value) : 0
+    }
 
     func restoreSelection() { selection = selectionStore.selection }
 
@@ -47,8 +72,8 @@ final class KeyboardState {
         do {
             let reader = try self.reader ?? LibraryReader.shared()
             let index = try reader.index()
-            if index.libraryRevision == libraryRevision, canPruneHistory {
-                cacheGeneration = index.cacheGeneration
+            if index.libraryRevision == libraryRevision,
+               index.cacheGeneration == cacheGeneration, canPruneHistory {
                 return false
             }
             let snapshot: LibrarySnapshot

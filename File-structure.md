@@ -467,3 +467,48 @@ Catalyst 시작 시 UIKit 시스템 탭과 NavigationSplitView의 네이티브 N
 2026-10-17 iCloud 설정 안내 정리: `Core/Sync/LibrarySyncService.swift`는 CloudKit 미설정 상태에서 개발자 팀 안내 문구 대신 빈 상태를 제공하며, `Features/Settings/SyncSettingsView.swift`는 비어 있는 상태를 표시하지 않는다. 기존 설정 동작과 동기화 데이터 경로는 유지한다. 두 기존 앱 파일 수정이며 타깃·리소스 변경은 없다.
 
 iCloud 설정 안내 정리 빌드·설치: iOS Debug와 Catalyst Release 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2 및 기존 맥 앱에 덮어쓰기 설치·실행했다. 맥 deep/strict 서명을 확인했다. 테스트는 실행하지 않았다.
+
+2026-10-18 키보드·맥 팝업 스크롤 복원: KeyboardState가 확장 전용 UserDefaults의 keyboard.scroll.v1.*에 탭별 세로 위치를 저장하고 KeyboardViewController/KeyboardPaging이 닫기·팩 전환 시 저장 및 레이아웃 후 복원을 수행한다. MacDesktop/DesktopPlugin의 PickerPageView는 탭별 mac.pickerScroll.v1.* 맥 기본 설정에 위치를 저장하고 새 페이지의 유효한 레이아웃에서 범위를 보정해 복원한다. iPad StickerGridLayout은 약 88pt 이상 정사각형 셀과 2pt 간격을 사용해 기존 작은 열 너비·늘어난 행 높이를 대체한다. GIF 표시는 iPhone과 동일한 StickerCell 내부 오버레이를 유지한다. 기존 파일 내부 책임 변경이며 타깃·리소스·설치 라이브러리 경로 변경은 없다. 테스트는 실행하지 않는다.
+
+스크롤 복원·iPad 배열 조정 빌드·설치: iOS Debug 및 Catalyst Release 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2와 기존 맥 앱에 데이터 유지 덮어쓰기 설치·실행 완료. 맥 deep/strict 서명 확인 완료. 자동·수동 테스트는 실행하지 않았다.
+
+2026-10-18 재표시 깜빡임·열기 비용 조정: 키보드는 초기 cache generation 수신만으로 프로세스 이미지 캐시를 지우지 않고 실제 세대 변경 때만 비운다. 목록 맨 앞 28개 사전 디코딩을 제거하고 저장 위치 복원 후 실제 가시 셀의 누락 포스터만 첫 표시 전에 채운다. MacDesktopCoordinator는 게시 index의 revision/cacheGeneration이 같으면 경로 검증을 마친 스냅샷을 재사용한다. DesktopPlugin은 동일 스냅샷에서 패널·그리드·셀 이미지를 유지하고 숨김 중 애니메이션만 보류한다. 최근 목록은 내용이 바뀐 경우만 재구성한다. PickerMediaButton은 숨김 시 이미지를 비우지 않으며 셀 재사용 때 작은 PNG 포스터를 즉시 제공한 뒤 GIF를 비동기 로드한다. 포스터 캐시는 8MB 한도로 유지한다. 기존 파일 내부 책임 변경으로 파일·타깃·리소스·설치 라이브러리 경로는 유지한다. 테스트는 실행하지 않는다.
+
+재표시 비용 조정 빌드·설치: 최종 iOS Debug 및 Catalyst arm64 Release 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2와 기존 맥 앱에 데이터 유지 덮어쓰기 설치·실행 완료. 맥 deep/strict 서명 확인 완료. 자동·수동 테스트 및 성능 측정은 실행하지 않았으며 실제 호스트에서의 깜빡임 해소·속도 변화는 미검증이다.
+
+2026-10-18 팩 스와이프 모션: KeyboardPaging은 손가락 이동을 직접 추적하고 놓는 속도로 0.18초 앞 위치를 예측해 전환/복귀를 결정한다. 남은 이동 거리로 정규화한 속도를 UIKit spring(mass 1/stiffness 300/damping 34)에 전달한다. DesktopPlugin의 PickerSwipeHandler는 트랙패드 이벤트의 시간·이동량으로 release velocity를 계산하고 동일한 예측 기준 및 AppKit 페이지 레이어의 CASpringAnimation에 전달한다. 두 페이지에 동일한 이동량·스프링을 적용하며 끝 탭은 비선형 저항으로 복귀한다. 동작 줄이기는 즉시 전환하고 기존 모멘텀 중복 전환 차단·가시 셀 재사용·스크롤 복원·타깃 경계를 유지한다. 새 파일·리소스·저장 경로 변경은 없다. 테스트는 실행하지 않는다.
+
+속도 연동 스와이프 빌드·설치: 최종 iOS Debug 및 Catalyst Release 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2와 맥 기존 설치에 데이터 유지 덮어쓰기 설치·실행 완료. 맥 deep/strict 서명 확인 완료. 자동·수동 테스트는 실행하지 않았으며 실제 스와이프 감각은 미검증이다.
+
+2026-10-18 iOS 키보드 스와이프 깜빡임 보정: KeyboardPaging은 전환 완료 시 미리보기 UICollectionView 자체를 현재 페이지로 승격하고 두 그리드의 역할을 교환한다. 동일 팩을 다른 그리드에 reloadData해 GIF·셀을 재생성하던 완료 경로를 제거했다. 역할 교환 시 접근성·상호작용·빈 목록 배경·스크롤 표시를 함께 이전하며 양쪽 pan gesture에 동일한 팩 스와이프 우선순위를 적용한다. 목적 페이지는 화면 밖에서 저장된 스크롤 위치와 가시 포스터를 준비한 뒤 노출한다. KeyboardLibraryLoading의 가시 포스터 준비를 임의 그리드에도 적용하도록 분리했다. 기존 파일 내부 책임 변경으로 파일·타깃·리소스·라이브러리 저장 경로는 유지한다. 속도 연동 스프링 모션은 유지하며 테스트는 실행하지 않는다.
+
+iOS 스와이프 깜빡임 보정 빌드·설치: iOS Debug 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2에 기존 데이터를 유지해 덮어쓰기 설치·실행 완료. 자동·수동 테스트는 실행하지 않았으며 실제 스와이프 깜빡임 해소는 미검증이다.
+
+2026-10-18 키보드 스와이프 시작 지연 보정: KeyboardPaging.preparePage에서 목적 화면의 모든 누락 PNG를 메인 스레드에서 동기 디코딩하던 prepareGridPosters 호출을 제거했다. 셀 구성은 메모리 캐시를 즉시 사용하고 누락 이미지는 기존 직렬 비동기 StickerThumbnailDecoder로 처리한다. reload 직후 레이아웃의 콘텐츠 크기만 계산하고 저장 Y를 설정한 뒤 한 번 레이아웃해 팩 맨 앞 셀을 먼저 생성·취소하던 작업도 줄였다. 깜빡임 보정의 실제 페이지 승격·GIF 유지와 속도 연동 스프링은 유지한다. 기존 파일 내부 변경으로 타깃·리소스·저장 경로 변경은 없다. 테스트는 실행하지 않는다.
+
+스와이프 시작 지연 보정 빌드·설치: 최종 iOS Debug 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2에 기존 데이터 유지 덮어쓰기 설치·실행 완료. 테스트·성능 측정은 실행하지 않았으며 실제 반응속도는 미검증이다.
+
+2026-10-18 맥 빠른 스크롤·연속 팩 이동: DesktopPlugin의 PickerMediaLoader는 PNG 디코딩과 GIF 파일 읽기를 각각 직렬 actor에서 수행한다. PickerMediaButton의 셀 구성 중 동기 파일 읽기를 제거하고 8MB 포스터 캐시를 유지한다. PickerPageView는 세로 스크롤 중 GIF 로딩·재생을 보류하고 마지막 입력 140ms 후 재개하며 스크롤 위치 설정 쓰기도 정지 시 한 번 게시한다(닫기·페이지 제거 시에도 저장). PickerContentView는 가로 누적 이동에서 완전히 지난 페이지 너비를 차감하며 실제 incoming 페이지를 현재로 승격하여 동일한 트랙패드·가로 휠 제스처로 여러 팩을 통과한다. 마지막 잔여 이동과 release velocity로 기존 스프링 전환/복귀를 수행한다. 손을 뗀 후 모멘텀의 추가 팩 전환 방지는 유지한다. 파일·타깃·리소스·라이브러리 저장 경로 변경은 없다. 테스트는 실행하지 않는다.
+
+맥 스크롤·연속 팩 이동 빌드·설치: Catalyst Release 및 iOS Debug 빌드 성공. 맥과 연결된 iPhone 15 Pro·iPad Pro 12.9 M2에 기존 데이터 유지 덮어쓰기 설치·실행 완료. 맥 deep/strict 서명 확인 완료. 자동·수동 테스트 및 성능 측정은 실행하지 않았다.
+
+2026-10-18 키보드·맥 팩 탭 Liquid Glass: KeyboardViewController의 상단 팩 탭·관리·다음 키보드 줄을 interactive UIGlassEffect(.regular)의 UIVisualEffectView로 감싼다. MacDesktop/DesktopPlugin의 팩 탭 스크롤 영역은 interactive NSGlassEffectView(.regular)로 감싼다. 양쪽 18pt 모서리·소폭 가로 inset을 사용하며 기존 탭 높이·그리드·제스처·페이지 재사용을 유지한다. 기존 파일 내부 UI 구성 변경으로 파일·타깃·리소스·저장 경로는 변경하지 않는다. 테스트는 실행하지 않는다.
+
+팩 탭 Liquid Glass 빌드·설치: iOS Debug와 Catalyst Release 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2 및 맥에 기존 데이터 유지 덮어쓰기 설치·실행 완료. 맥 deep/strict 서명 확인 완료. 자동·수동 테스트는 실행하지 않았다.
+
+2026-10-18 팩 헤더 글래스 의도 보정: 앞선 둥근 interactive 탭 배경을 제거했다. KeyboardViewController는 그리드와 분리된 세로 스택 대신 전체 높이 그리드 위에 사각 UIGlassEffect(.regular) 헤더를 겹친다. 헤더 높이에 맞춘 contentInset으로 초기 콘텐츠를 아래에 두고 스크롤된 스티커는 헤더 뒤로 지나간다. 스크롤 저장·복원은 inset을 제외한 논리 위치를 유지한다. DesktopPlugin도 전체 높이 viewport 위에 전체 폭·모서리 0의 NSGlassEffectView를 겹치고 페이지의 56pt 상단 inset을 저장 위치에 보정한다. 기존 파일 내부 UI 구성 변경으로 파일·타깃·리소스·라이브러리 저장 경로는 유지한다. 앞선 둥근 팩 탭 Liquid Glass 설명을 대체한다.
+
+사각 글래스 헤더 보정 빌드·설치: iOS Debug 및 Catalyst Release 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2와 맥에 데이터 유지 덮어쓰기 설치·실행 완료. 맥 deep/strict 서명 확인 완료. 자동·수동 테스트는 실행하지 않았다.
+
+2026-10-18 팩 상단 글래스 전체 원복: 사용자의 원복 요청에 따라 둥근 탭 글래스와 사각 겹침 헤더를 모두 제거했다. KeyboardViewController는 기존 topBar/그리드 세로 스택과 0 상단 contentInset으로, DesktopPlugin은 기존 tabScroll/viewport/message 스택 및 16pt 외곽 여백으로 복원했다. 헤더 inset 보정도 제거했다. 글래스 적용 전의 스크롤 복원·팩 스와이프 모션·페이지 재사용·맥 연속 팩 이동·스크롤 성능 수정은 유지한다. 기존 맥 팝업 창 자체의 글래스는 유지한다. 파일·타깃·리소스·저장 경로 변경은 없다.
+
+상단 글래스 원복 빌드·설치: iOS Debug 및 Catalyst Release 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2와 맥에 기존 데이터 유지 덮어쓰기 설치·실행 완료. 맥 deep/strict 서명 확인 완료. 테스트는 실행하지 않았다.
+
+2026-10-18 대각선 팩 스와이프 판정: KeyboardPaging의 가로 시작 기준을 |vx| > 2×|vy|에서 |vx| > 0.85×|vy|로, DesktopPlugin의 트랙패드/가로 휠 축 선택 기준을 |dx| > 1.2×|dy|에서 |dx| > 0.85×|dy|로 완화했다. 약한 대각선 및 45도 이동도 가로 팩 이동으로 처리하며 세로 성분이 충분히 큰 입력은 기존 세로 스크롤로 유지한다. 스프링·페이지 재사용·연속 팩 이동·저장 위치·타깃 경계는 유지한다. 기존 두 파일 내부 판정 변경이며 테스트는 실행하지 않는다.
+
+대각선 판정 조정 빌드·설치: iOS Debug 및 Catalyst Release 빌드 성공. 연결된 iPhone 15 Pro·iPad Pro 12.9 M2와 맥에 기존 데이터 유지 덮어쓰기 설치·실행 완료. 맥 deep/strict 서명 확인 완료. 테스트는 실행하지 않았다.
+
+
+2026-10-18 이전 화면 상태 잔류 방지: LibraryView는 설치 팩 상세의 SwiftUI identity를 pack.id로 구분하여 팩 전환 시 공유 시트·삭제 확인·확대 상태 등 이전 팩의 로컬 상태가 새 팩에 이어지지 않게 한다. InstalledPackView의 부분적인 pack.id 변경 초기화는 제거한다. LibraryModel.refresh는 요청 세대와 취소 여부를 확인한 뒤 결과·오류를 게시하여 늦게 끝난 과거 목록이 최신 결과를 덮지 않게 한다. KeyboardState의 기존 snapshot 재사용 및 KeyboardLibraryLoading의 비동기 갱신 생략 조건은 libraryRevision과 cacheGeneration을 함께 비교한다. 갱신된 키보드 목록을 적용한 뒤 현재 탭의 저장 스크롤 위치를 다시 보정한다. 기존 파일 내부 변경이며 파일·타깃·리소스·설치 데이터 경로는 유지한다. 테스트는 실행하지 않는다.
+
+이전 화면 상태 잔류 방지 빌드·설치: 앱·키보드 확장의 iOS Debug 실기기 빌드 성공. 연결된 iPhone 15 Pro에 기존 데이터를 유지해 덮어쓰기 설치·실행 완료. 테스트·수동 UI 검증은 실행하지 않았으며 사용자가 관찰한 간헐적 구형 UI 노출의 실제 재현·해소 여부는 미검증이다.

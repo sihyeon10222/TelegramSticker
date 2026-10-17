@@ -22,11 +22,13 @@ final class StickerGridLayout: UICollectionViewLayout {
         let width = max(1, view.bounds.width - view.contentInset.left - view.contentInset.right)
         let height = max(1, view.bounds.height - view.contentInset.top - view.contentInset.bottom)
         let accessible = view.traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        let pad = view.traitCollection.userInterfaceIdiom == .pad
         columns = accessible ? max(1, Int((width + spacing) / 102)) :
-            max(1, min(Int((width + spacing) / 46), max(7, Int((width + spacing) / 58))))
+            (pad ? max(1, Int((width + spacing) / 88)) :
+            max(1, min(Int((width + spacing) / 46), max(7, Int((width + spacing) / 58)))))
         let cellWidth = (width - CGFloat(columns - 1) * spacing) / CGFloat(columns)
         let rows = max(1, min(4, Int((height + spacing) / (44 + spacing))))
-        let cellHeight = accessible ? max(44, cellWidth) : max(44, (height - CGFloat(rows - 1) * spacing) / CGFloat(rows))
+        let cellHeight = (accessible || pad) ? max(44, cellWidth) : max(44, (height - CGFloat(rows - 1) * spacing) / CGFloat(rows))
         itemSize = CGSize(width: cellWidth, height: cellHeight)
         sections = []
         sections.reserveCapacity(view.numberOfSections)

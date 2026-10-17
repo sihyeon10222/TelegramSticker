@@ -504,6 +504,7 @@ struct LibraryView: View {
                 }) {
                     await model.delete(ids: [pack.id])
                 }
+                .id(pack.id)
             } else {
                 ContentUnavailableView("스티커 팩을 선택하세요", systemImage: "square.grid.2x2")
                     .navigationBarTitleDisplayMode(.inline)

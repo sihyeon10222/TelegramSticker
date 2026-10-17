@@ -207,13 +207,6 @@ struct InstalledPackView: View {
             columnCount = sizeClass == .regular ? 5 : 4
             pinchStartColumns = nil
         }
-        .onChange(of: pack.id) { _, _ in
-            resetSelection()
-            copiedID = nil
-            focusedStickerID = nil
-            storageBytes = nil
-            status = "두 손가락으로 확대하거나 축소할 수 있어요."
-        }
         .onChange(of: activeTab) { _, tab in
             if tab != .library { resetSelection() }
         }

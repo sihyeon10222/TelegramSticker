@@ -9,6 +9,9 @@ final class MacDesktopCoordinator {
     private var plugin: DesktopPluginProtocol?
     private var stickers: [String: Sticker] = [:]
     private var library: LibraryModel?
+    private var snapshotRevision: String?
+    private var snapshotGeneration: String?
+    private var cachedSnapshot: [NSDictionary] = []
 
     func start() {
         guard plugin == nil, let url = Bundle.main.builtInPlugInsURL?.appendingPathComponent("StickerBridgeDesktop.bundle"),
@@ -32,11 +35,14 @@ final class MacDesktopCoordinator {
     }
 
     private func snapshot() -> [NSDictionary] {
-        // Recreate from published manifests so every opening sees current revisions.
+        // Check the small published index; resolve every sticker path only when it changes.
+        let index = try? LibraryReader.shared().index()
+        if let index, snapshotRevision == index.libraryRevision,
+           snapshotGeneration == index.cacheGeneration { return cachedSnapshot }
         let library = LibraryModel()
         self.library = library
         stickers.removeAll()
-        return library.packs.map { pack in
+        let result: [NSDictionary] = library.packs.map { pack in
             var playback: [String: String] = [:]
             for record in pack.stickers {
                 if let path = record.playbackPath, let url = try? library.reader?.file(path) {
@@ -50,8 +56,15 @@ final class MacDesktopCoordinator {
                         "playback": playback[sticker.id] ?? "",
                         "animation": sticker.animationURL?.path ?? ""]
             }
-            return ["id": pack.id, "title": pack.title, "stickers": items]
+            return ["id": pack.id, "title": pack.title, "stickers": items,
+                    "cacheGeneration": index?.cacheGeneration ?? ""]
         }
+        if library.isAvailable, let index {
+            snapshotRevision = index.libraryRevision
+            snapshotGeneration = index.cacheGeneration
+            cachedSnapshot = result
+        }
+        return result
     }
     func showManagement() { plugin?.showManagement() }
     func togglePicker() { plugin?.togglePicker() }

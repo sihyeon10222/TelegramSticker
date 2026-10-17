@@ -7,7 +7,6 @@ extension KeyboardViewController {
         let restored = state.restoreLibrary()
         updateCacheGeneration(state.cacheGeneration)
         if restored {
-            prewarmFirstFrame()
             applySelection()
         } else if state.libraryRevision == nil { applySelection() }
         return restored
@@ -16,43 +15,52 @@ extension KeyboardViewController {
     func updateCacheGeneration(_ generation: String?) {
         guard generation != displayedCacheGeneration else { return }
         displayedCacheGeneration = generation
+        guard state.shouldInvalidateImageCache(for: generation) else { return }
         images.removeAll()
         Task { await GIFFrameDecoder.shared.clear(); await StickerThumbnailDecoder.shared.clear() }
     }
 
     func acceptLibrary(reader: LibraryReader, snapshot: LibrarySnapshot) {
+        state.saveScrollOffset(Double(collectionView.contentOffset.y))
         state.acceptLibrary(reader: reader, snapshot: snapshot)
         updateCacheGeneration(state.cacheGeneration)
-        prewarmFirstFrame()
         applySelection()
+        pendingScrollRestoration = true
+        restoreScrollPositionIfNeeded()
     }
 
-    func prewarmFirstFrame() {
-        // Only the first viewport, once before presentation; never decode a whole pack here.
-        // Re-entry uses the bounded process cache and keeps existing cell images.
-        var covers = Array(state.packs.prefix(6))
-        if case .pack(let id) = state.selection, let pack = state.packs.first(where: { $0.id == id }),
-           !covers.contains(where: { $0.id == id }) { covers.append(pack) }
-        for pack in covers {
-            if let cover = state.prepared[pack.id]?.first { _ = images.thumbnail(for: cover, pixels: 22) }
+    func prepareVisiblePosters() {
+        let visibleTabs = tabScroll.bounds
+        for button in packTabs.arrangedSubviews.compactMap({ $0 as? PackTabButton }) {
+            guard button.convert(button.bounds, to: tabScroll).intersects(visibleTabs),
+                  let id = button.packID, let cover = state.prepared[id]?.first else { continue }
+            button.configuration?.image = images.thumbnail(for: cover, pixels: 22)?.withRenderingMode(.alwaysOriginal)
         }
-        // Complete the bounded first page before exposing it. A time cutoff left
-        // the last cells blank for several frames on cold system→sticker switches.
-        images.preparePosters(for: state.sections(for: state.selection).joined(), limit: 28)
+        // Restore the viewport first. Decode only missing posters on that screen,
+        // never the beginning of every pack or the library above the saved offset.
+        prepareGridPosters(in: collectionView)
+    }
+
+    func prepareGridPosters(in grid: UICollectionView) {
+        for path in grid.indexPathsForVisibleItems {
+            guard let sticker = sticker(at: path, in: grid),
+                  let cell = grid.cellForItem(at: path) as? StickerCell else { continue }
+            cell.setPoster(images.thumbnail(for: sticker))
+        }
     }
 
     func reloadLibrary(preservingStatus: String? = nil, persistentStatus: Bool = true, force: Bool = false) {
         loadTask?.cancel()
         loadGeneration += 1
         let generation = loadGeneration
-        if let index = try? state.reader?.index() { updateCacheGeneration(index.cacheGeneration) }
         let currentRevision = force ? nil : state.libraryRevision
+        let currentCacheGeneration = state.cacheGeneration
         loadTask = Task { [weak self] in
             let result = await Task.detached { () -> Result<(LibraryReader, LibrarySnapshot)?, Error> in
                 Result {
                     let reader = try LibraryReader.shared()
                     let index = try reader.index()
-                    guard index.libraryRevision != currentRevision else { return nil }
+                    guard index.libraryRevision != currentRevision || index.cacheGeneration != currentCacheGeneration else { return nil }
                     return (reader, try reader.snapshot())
                 }
             }.value

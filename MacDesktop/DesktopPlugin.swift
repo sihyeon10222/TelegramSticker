@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import ImageIO
 import Carbon
 import ServiceManagement
 
@@ -36,6 +37,8 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
     private var openManagement: (() -> Void)?
     private var statusItem: NSStatusItem?
     private var panel: PickerPanel?
+    private var pickerContent: PickerContentView?
+    private var pickerSnapshot: [NSDictionary] = []
     private var hotKey: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private var monitors: [Any] = []
@@ -211,7 +214,22 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
     }
     func togglePicker() {
         if panel?.isVisible == true { dismiss(); return }
-        let packs = (snapshot?() ?? []).compactMap(PickerPack.init)
+        let published = snapshot?() ?? []
+        if panel == nil || !(published as NSArray).isEqual(to: pickerSnapshot) {
+            PickerMediaButton.clearPosterCache()
+            pickerContent = nil
+            panel = nil
+            pickerSnapshot = published
+            buildPicker(packs: published.compactMap(PickerPack.init))
+        }
+        guard let panel else { return }
+        pickerContent?.resumePreviews()
+        panel.contentView?.layoutSubtreeIfNeeded()
+        panel.makeKeyAndOrderFront(nil)
+        installPickerMonitors()
+    }
+
+    private func buildPicker(packs: [PickerPack]) {
         let model = PickerModel(packs: packs, defaults: defaults)
         let panel = PickerPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360), styleMask: [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true; panel.level = .floating
@@ -233,6 +251,7 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
             if let error = self.copySticker?(id) { model.message = error }
             else if self.copySticker != nil { model.record(id); self.dismiss() }
         })
+        pickerContent = content
         panel.onSettings = { [weak self] in self?.showManagement() }
         panel.onZoom = { [weak content] step in content?.zoom(by: step) }
         let glass = NSGlassEffectView(frame: panel.contentView!.bounds)
@@ -245,7 +264,9 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
         }
         panel.setFrame(restoredPickerFrame(), display: false)
         self.panel = panel
-        panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func installPickerMonitors() {
         if let monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in self?.dismiss() }) { monitors.append(monitor) }
         if let monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown], handler: { [weak self] event in
             if event.type == .keyDown, event.window === self?.panel {
@@ -288,7 +309,8 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
 
     private func dismiss() {
         savePickerFrame()
-        panel?.orderOut(nil); panel = nil
+        pickerContent?.suspendPreviews()
+        panel?.orderOut(nil)
         monitors.forEach(NSEvent.removeMonitor); monitors.removeAll()
     }
 }
@@ -381,6 +403,7 @@ private final class PickerContentView: NSView {
     private var transitionToken = 0
     private var settlementCommits = false
     private var needsRevealTab = true
+    private var dragConsumed: CGFloat = 0
     private var pinching = false
     private var pinchStart: CGFloat = 72
     private var pinchScale: CGFloat = 1
@@ -419,7 +442,7 @@ private final class PickerContentView: NSView {
         current = makePage(id: model.selected)
         viewport.addSubview(current)
         gestures.onDrag = { [weak self] offset in self?.dragPage(offset: offset) }
-        gestures.onEndDrag = { [weak self] offset, cancelled in self?.endDrag(offset: offset, cancelled: cancelled) }
+        gestures.onEndDrag = { [weak self] offset, velocity, cancelled in self?.endDrag(offset: offset, velocity: velocity, cancelled: cancelled) }
         gestures.onChangePack = { [weak self] step in self?.changePack(by: step) }
         gestures.onVerticalScroll = { [weak self] event in self?.current.scrollVertically(with: event) }
         viewport.onScrollEvent = { [weak self] event in self?.gestures.scrollWheel(with: event) }
@@ -451,6 +474,23 @@ private final class PickerContentView: NSView {
             tabs.layoutSubtreeIfNeeded()
             revealSelectedTab(); needsRevealTab = false
         }
+    }
+    func suspendPreviews() {
+        interruptSettlement()
+        current.saveScrollPosition()
+        current.setZooming(true)
+        tabs.arrangedSubviews.forEach { ($0 as? PickerMediaButton)?.setPlaybackSuspended(true) }
+    }
+    func resumePreviews() {
+        if model.selected == "recent", current.stickerIDs != model.sections(for: "recent").flatMap(\.stickers).map(\.id) {
+            current.removeFromSuperview()
+            current = makePage(id: model.selected)
+            viewport.addSubview(current)
+        }
+        current.setZooming(false)
+        tabs.arrangedSubviews.forEach { ($0 as? PickerMediaButton)?.setPlaybackSuspended(false) }
+        needsRevealTab = true
+        needsLayout = true
     }
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow == nil {
@@ -489,6 +529,10 @@ private final class PickerContentView: NSView {
                                   : "앱에서 스티커 팩을 추가해 주세요.", copy: copy)
         page.setCellTarget(model.cellTarget)
         page.frame = viewport.bounds
+        page.pendingScrollOffset = model.defaults.double(forKey: "mac.pickerScroll.v1." + id)
+        page.onScrollPosition = { [weak model] offset in
+            model?.defaults.set(Double(offset), forKey: "mac.pickerScroll.v1." + id)
+        }
         page.onMagnifyEvent = { [weak self] event in self?.magnify(with: event) }
         page.onScrollEvent = { [weak self] event in self?.gestures.scrollWheel(with: event) }
         page.onSwipeEvent = { [weak self] event in self?.gestures.swipe(with: event) }
@@ -517,22 +561,40 @@ private final class PickerContentView: NSView {
     }
     private func dragPage(offset: CGFloat) {
         interruptSettlement()
+        if !dragging { dragConsumed = 0 }
         dragging = true
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        let step = offset < 0 ? 1 : -1
+        let width = max(1, viewport.bounds.width)
+        var residual = offset - dragConsumed
+        // Consume complete pages while contact continues; preserve the remaining
+        // displacement so the next page follows the same continuous gesture.
+        while abs(residual) >= width {
+            let step = residual < 0 ? 1 : -1
+            guard prepareIncoming(step: step), let next = incoming, let id = incomingID else { break }
+            current.stopPreviews(); current.removeFromSuperview()
+            current = next; current.frame = viewport.bounds
+            model.selected = id; model.message = nil
+            incoming = nil; incomingID = nil
+            dragConsumed -= CGFloat(step) * width
+            residual = offset - dragConsumed
+            updateTabs()
+        }
+        let step = residual < 0 ? 1 : -1
         let available = prepareIncoming(step: step)
-        let movement = available ? max(-viewport.bounds.width, min(viewport.bounds.width, offset)) : offset * 0.18
-        current.frame.origin.x = movement
-        if available { incoming?.frame.origin.x = movement + CGFloat(step) * viewport.bounds.width }
+        let movement = available ? max(-width, min(width, residual)) : residual * 0.55 * width / (width + 0.55 * abs(residual))
+        let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        current.frame.origin.x = reduced ? 0 : movement
+        if available { incoming?.frame.origin.x = reduced ? CGFloat(step) * width : movement + CGFloat(step) * width }
         else { incoming?.removeFromSuperview(); incoming = nil; incomingID = nil }
     }
-    private func endDrag(offset: CGFloat, cancelled: Bool) {
+    private func endDrag(offset: CGFloat, velocity: CGFloat, cancelled: Bool) {
         guard !settling else { return }
-        dragging = false
-        let step = offset < 0 ? 1 : -1
-        let commit = !cancelled && abs(offset) >= min(100, max(45, viewport.bounds.width * 0.18))
-        if commit, prepareIncoming(step: step) { settle(commit: true) }
-        else { settle(commit: false) }
+        let residual = offset - dragConsumed
+        dragging = false; dragConsumed = 0
+        let step = residual < 0 ? 1 : -1
+        let projected = residual + velocity * 0.18
+        let commit = !cancelled && projected * CGFloat(-step) > viewport.bounds.width * 0.28
+        if commit, prepareIncoming(step: step) { settle(commit: true, velocity: velocity) }
+        else { settle(commit: false, velocity: velocity) }
     }
     private func selectPack(id: String) {
         interruptSettlement()
@@ -564,7 +626,7 @@ private final class PickerContentView: NSView {
         current.frame = viewport.bounds
         settling = false; dragging = false
     }
-    private func settle(commit: Bool) {
+    private func settle(commit: Bool, velocity: CGFloat = 0) {
         settlementCommits = commit
         settling = true
         transitionToken += 1
@@ -585,12 +647,34 @@ private final class PickerContentView: NSView {
             self.settling = false; self.dragging = false
         }
         if reduced { finish(); return }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.24
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            current.animator().setFrameOrigin(NSPoint(x: commit ? -CGFloat(incomingStep) * width : 0, y: 0))
-            incoming?.animator().setFrameOrigin(NSPoint(x: commit ? 0 : CGFloat(incomingStep) * width, y: 0))
-        } completionHandler: { MainActor.assumeIsolated { finish() } }
+        // Both pages share a critically damped spring and the measured release
+        // velocity. Their gap stays fixed throughout the transition.
+        let destination = commit ? -CGFloat(incomingStep) * width : 0
+        let start = current.frame.origin.x
+        let spring = CASpringAnimation(keyPath: "position.x")
+        spring.mass = 1; spring.stiffness = 300; spring.damping = 34
+        let remaining = destination - start
+        spring.initialVelocity = abs(remaining) > 1 ? max(-20, min(20, velocity / remaining)) : 0
+        spring.duration = spring.settlingDuration
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let currentPosition = current.layer?.position.x ?? 0
+        let incomingPosition = incoming?.layer?.position.x ?? 0
+        current.setFrameOrigin(NSPoint(x: destination, y: 0))
+        incoming?.setFrameOrigin(NSPoint(x: destination + CGFloat(incomingStep) * width, y: 0))
+        CATransaction.commit()
+        spring.fromValue = currentPosition
+        spring.toValue = currentPosition + destination - start
+        current.layer?.add(spring, forKey: "pageSpring")
+        if let incoming {
+            let next = spring.copy() as! CASpringAnimation
+            next.fromValue = incomingPosition
+            next.toValue = incomingPosition + destination - start
+            incoming.layer?.add(next, forKey: "pageSpring")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + spring.duration) {
+            MainActor.assumeIsolated { finish() }
+        }
     }
     private func buildTabs() {
         for (id, label, symbol) in [("all", "전체", "square.grid.2x2"), ("recent", "최근 사용", "clock")] {
@@ -644,6 +728,25 @@ private final class PickerContentView: NSView {
 private final class PickerPreviewImage: NSImageView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
+// Separate serial lanes keep PNG posters responsive while GIF files are read.
+private actor PickerMediaLoader {
+    static let posters = PickerMediaLoader()
+    static let animations = PickerMediaLoader()
+    func data(_ path: String) -> Data? {
+        guard !Task.isCancelled else { return nil }
+        return try? Data(contentsOf: URL(fileURLWithPath: path))
+    }
+    func poster(_ path: String) -> CGImage? {
+        guard !Task.isCancelled, !path.isEmpty,
+              let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 160,
+            kCGImageSourceShouldCacheImmediately: true
+        ] as CFDictionary)
+    }
+}
+
 @MainActor
 private final class PickerMediaButton: NSButton {
     private let preview = PickerPreviewImage()
@@ -651,9 +754,11 @@ private final class PickerMediaButton: NSButton {
     private var suspended = false
     private var loading: Task<Void, Never>?
     private var previewVisible = false
+    private var mediaLoaded = false
+    private static let posters = NSCache<NSString, NSImage>()
+    static func clearPosterCache() { posters.removeAllObjects() }
 
     init(sticker: PickerSticker?, target: AnyObject?, action: Selector?) {
-        self.sticker = sticker
         super.init(frame: .zero)
         self.target = target; self.action = action
         title = ""; isBordered = false
@@ -662,6 +767,7 @@ private final class PickerMediaButton: NSButton {
         preview.image = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
         preview.frame = .zero
         addSubview(preview)
+        if let sticker { configure(sticker: sticker) }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layout() {
@@ -672,32 +778,59 @@ private final class PickerMediaButton: NSButton {
         guard self.sticker?.id != sticker.id else { return }
         setPreviewVisible(false)
         self.sticker = sticker
+        mediaLoaded = false
+        preview.image = Self.posters.object(forKey: sticker.thumbnail as NSString)
         identifier = NSUserInterfaceItemIdentifier(sticker.id)
         toolTip = sticker.name; setAccessibilityLabel(sticker.name)
+    }
+    private var posterTask: Task<Void, Never>?
+    private func loadPosterIfNeeded() {
+        guard preview.image == nil, posterTask == nil, let sticker else { return }
+        posterTask = Task { [weak self] in
+            let image = await PickerMediaLoader.posters.poster(sticker.thumbnail)
+            guard let self, !Task.isCancelled, self.sticker?.id == sticker.id else { return }
+            self.posterTask = nil
+            guard let image else { return }
+            let poster = NSImage(cgImage: image, size: .zero)
+            Self.posters.totalCostLimit = 8 * 1024 * 1024
+            Self.posters.setObject(poster, forKey: sticker.thumbnail as NSString, cost: image.bytesPerRow * image.height)
+            if !self.mediaLoaded { self.preview.image = poster }
+        }
     }
     func setPlaybackSuspended(_ value: Bool) {
         guard suspended != value else { return }
         suspended = value
         preview.animates = previewVisible && !suspended
+        if value { loading?.cancel(); loading = nil }
+        else { loadAnimationIfNeeded() }
     }
     func setPreviewVisible(_ visible: Bool) {
         guard previewVisible != visible else { return }
         previewVisible = visible
         loading?.cancel(); loading = nil
         preview.animates = visible && !suspended
-        guard visible, let sticker else { preview.image = nil; return }
-        let paths = [sticker.playback, sticker.animation, sticker.thumbnail].filter { !$0.isEmpty }
+        if !visible { posterTask?.cancel(); posterTask = nil; return }
+        loadPosterIfNeeded()
+        loadAnimationIfNeeded()
+    }
+    private func loadAnimationIfNeeded() {
+        guard previewVisible, !suspended, !mediaLoaded, loading == nil, let sticker else { return }
+        let paths = [sticker.playback, sticker.animation].filter { !$0.isEmpty }
+        guard !paths.isEmpty else { return }
         loading = Task { [weak self] in
-            // Prepared small playback GIF is preferred; original GIF and PNG are safe fallbacks.
             for path in paths {
-                let data = await Task.detached(priority: .utility) { try? Data(contentsOf: URL(fileURLWithPath: path)) }.value
-                guard !Task.isCancelled, let self, self.previewVisible else { return }
+                let data = await PickerMediaLoader.animations.data(path)
+                guard !Task.isCancelled, let self, self.previewVisible, !self.suspended,
+                      self.sticker?.id == sticker.id else { return }
                 if let data, let image = NSImage(data: data) {
+                    self.mediaLoaded = true
                     self.preview.image = image
-                    self.preview.animates = !self.suspended
+                    self.preview.animates = true
+                    self.loading = nil
                     return
                 }
             }
+            self?.loading = nil
         }
     }
     override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -712,13 +845,29 @@ private final class PickerGridDocument: NSView {
 }
 @MainActor
 private final class PickerPageView: NSScrollView {
+    var pendingScrollOffset: Double?
+    var onScrollPosition: ((CGFloat) -> Void)?
     var onScrollEvent: ((NSEvent) -> Void)?
     var onSwipeEvent: ((NSEvent) -> Void)?
     var onMagnifyEvent: ((NSEvent) -> Void)?
     override func magnify(with event: NSEvent) { onMagnifyEvent?(event) }
     override func scrollWheel(with event: NSEvent) { onScrollEvent?(event) }
     override func swipe(with event: NSEvent) { onSwipeEvent?(event) }
-    func scrollVertically(with event: NSEvent) { super.scrollWheel(with: event) }
+    private var scrollResume: Task<Void, Never>?
+    private var scrolling = false
+    func scrollVertically(with event: NSEvent) {
+        scrolling = true
+        scrollResume?.cancel()
+        cells.values.forEach { $0.setPlaybackSuspended(true) }
+        super.scrollWheel(with: event)
+        scrollResume = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled, let self else { return }
+            self.scrolling = false
+            self.onScrollPosition?(self.contentView.bounds.minY)
+            self.updatePreviews()
+        }
+    }
     private struct SectionLayout {
         let section: Int
         let start: Int
@@ -729,6 +878,7 @@ private final class PickerPageView: NSScrollView {
     }
     private let sections: [PickerSection]
     private let stickers: [PickerSticker]
+    var stickerIDs: [String] { stickers.map(\.id) }
     private let copy: (String) -> Void
     private let document = PickerGridDocument()
     private var cells: [Int: PickerMediaButton] = [:]
@@ -749,6 +899,7 @@ private final class PickerPageView: NSScrollView {
     init(sections: [PickerSection], emptyMessage: String, copy: @escaping (String) -> Void) {
         self.sections = sections; self.stickers = sections.flatMap(\.stickers); self.copy = copy
         super.init(frame: .zero)
+        wantsLayer = true
         drawsBackground = false; hasVerticalScroller = true; autohidesScrollers = true
         scrollerStyle = .overlay
         documentView = document
@@ -761,13 +912,24 @@ private final class PickerPageView: NSScrollView {
         }
         contentView.postsBoundsChangedNotifications = true
         observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: contentView, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updatePreviews() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.updatePreviews()
+                if self.pendingScrollOffset == nil, !self.scrolling { self.onScrollPosition?(self.contentView.bounds.minY) }
+            }
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
     override func layout() {
         super.layout()
+        if let offset = pendingScrollOffset, contentView.bounds.width > 1, contentView.bounds.height > 1 {
+            measure()
+            pendingScrollOffset = nil
+            let y = offset.isFinite ? min(max(0, offset), max(0, contentHeight - contentView.bounds.height)) : 0
+            contentView.scroll(to: NSPoint(x: 0, y: y))
+            reflectScrolledClipView(contentView)
+        }
         updatePreviews()
     }
     override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); updatePreviews() }
@@ -782,10 +944,17 @@ private final class PickerPageView: NSScrollView {
         cells.values.forEach { $0.setPlaybackSuspended(zooming) }
         updatePreviews()
     }
-    func stopPreviews() { cells.values.forEach { $0.setPreviewVisible(false) } }
+    func saveScrollPosition() {
+        if pendingScrollOffset == nil { onScrollPosition?(contentView.bounds.minY) }
+    }
+    func stopPreviews() {
+        saveScrollPosition()
+        scrollResume?.cancel()
+        cells.values.forEach { $0.setPreviewVisible(false) }
+    }
     func setZooming(_ value: Bool) {
         zooming = value
-        cells.values.forEach { $0.setPlaybackSuspended(value || suspended) }
+        cells.values.forEach { $0.setPlaybackSuspended(value || suspended || scrolling) }
         if !value { updatePreviews() }
     }
     func setCellTarget(_ value: CGFloat) {
@@ -874,8 +1043,8 @@ private final class PickerPageView: NSScrollView {
                 button.configure(sticker: stickers[id]); cells[id] = button; document.addSubview(button)
             }
             button.frame = frame
-            button.setPlaybackSuspended(suspended || zooming)
-            if !suspended && !zooming { button.setPreviewVisible(true) }
+            button.setPlaybackSuspended(suspended || zooming || scrolling)
+            button.setPreviewVisible(true)
         }
         for id in Array(headers.keys) where desiredHeaders[id] == nil {
             headers.removeValue(forKey: id)?.removeFromSuperview()
@@ -902,7 +1071,7 @@ private final class PickerPageView: NSScrollView {
 private final class PickerSwipeHandler {
     var onVerticalScroll: ((NSEvent) -> Void)?
     var onDrag: ((CGFloat) -> Void)?
-    var onEndDrag: ((CGFloat, Bool) -> Void)?
+    var onEndDrag: ((CGFloat, CGFloat, Bool) -> Void)?
     var onChangePack: ((Int) -> Void)?
     private enum Axis { case horizontal, vertical }
     private var axis: Axis?
@@ -910,6 +1079,8 @@ private final class PickerSwipeHandler {
     private var vertical: CGFloat = 0
     private var finished = false
     private var lastEventTime: TimeInterval = 0
+    private var releaseVelocity: CGFloat = 0
+    private var lastMotionTime: TimeInterval = 0
     private var lastTurnTime: TimeInterval = -.infinity
     private var wheelEnd: DispatchWorkItem?
     private var routingVertical = false
@@ -925,7 +1096,14 @@ private final class PickerSwipeHandler {
         let phased = !event.phase.isEmpty || !event.momentumPhase.isEmpty
         if event.phase.contains(.began) || event.phase.contains(.mayBegin) || (!phased && event.timestamp - lastEventTime > 0.25) {
             axis = nil; horizontal = 0; vertical = 0; finished = false
+            releaseVelocity = 0; lastMotionTime = event.timestamp
         }
+        let interval = event.timestamp - lastMotionTime
+        if event.momentumPhase.isEmpty, abs(event.scrollingDeltaX) > 0.01 {
+            let sample = event.scrollingDeltaX / CGFloat(max(1.0 / 120, min(0.05, interval)))
+            releaseVelocity = interval > 0.08 ? sample : releaseVelocity * 0.25 + sample * 0.75
+            lastMotionTime = event.timestamp
+        } else if event.timestamp - lastMotionTime > 0.08 { releaseVelocity = 0 }
         lastEventTime = event.timestamp
         if !event.momentumPhase.isEmpty {
             if axis != .horizontal { scrollVertically(event) }
@@ -934,7 +1112,7 @@ private final class PickerSwipeHandler {
         horizontal += event.scrollingDeltaX
         vertical += event.scrollingDeltaY
         if axis == nil, max(abs(horizontal), abs(vertical)) > 6 {
-            axis = abs(horizontal) > abs(vertical) * 1.2 ? .horizontal : .vertical
+            axis = abs(horizontal) > abs(vertical) * 0.85 ? .horizontal : .vertical
         }
         guard axis == .horizontal else { scrollVertically(event); return }
         if !finished { onDrag?(horizontal) }
@@ -951,7 +1129,7 @@ private final class PickerSwipeHandler {
         guard !finished else { return }
         finished = true; lastTurnTime = lastEventTime
         wheelEnd?.cancel(); wheelEnd = nil
-        onEndDrag?(horizontal, cancelled)
+        onEndDrag?(horizontal, releaseVelocity, cancelled)
     }
     func swipe(with event: NSEvent) {
         guard event.deltaX != 0 else { return }

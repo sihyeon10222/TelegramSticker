@@ -2,6 +2,16 @@ import UIKit
 import os
 
 extension KeyboardViewController {
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if scrollView === collectionView, !decelerate {
+            state.saveScrollOffset(Double(collectionView.contentOffset.y))
+        }
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        if scrollView === collectionView { state.saveScrollOffset(Double(collectionView.contentOffset.y)) }
+    }
+
     func selectionDescription() -> String {
         let title: String
         switch state.selection {
