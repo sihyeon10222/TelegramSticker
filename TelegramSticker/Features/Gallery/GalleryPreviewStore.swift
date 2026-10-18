@@ -222,6 +222,7 @@ actor GalleryPreviewStore {
         if let reader = try? LibraryReader.shared(), let snapshot = try? reader.snapshot(resolvingFiles: false),
            let manifest = snapshot.packs.first(where: { $0.telegramName == pack }),
            let record = manifest.stickers.first(where: { $0.id == sticker.id }),
+           record.sourceFormat == sticker.format,
            let poster = try? reader.file(record.thumbnailPath), fm.fileExists(atPath: poster.path) {
             let animation = (record.playbackPath ?? record.animationPath).flatMap { try? reader.file($0) }
             return GalleryPreviewFiles(poster: poster, animation: animation.flatMap { fm.fileExists(atPath: $0.path) ? $0 : nil })
@@ -232,7 +233,8 @@ actor GalleryPreviewStore {
         // Reuse installed playback data before performing any preview network request.
         if let reader = try? LibraryReader.shared(), let snapshot = try? reader.snapshot(resolvingFiles: false),
            let manifest = snapshot.packs.first(where: { $0.telegramName == pack }),
-           let record = manifest.stickers.first(where: { $0.id == sticker.id }) {
+           let record = manifest.stickers.first(where: { $0.id == sticker.id }),
+           record.sourceFormat == sticker.format {
             let poster = try? reader.file(record.thumbnailPath)
             let animation = animate ? (record.playbackPath ?? record.animationPath).flatMap { try? reader.file($0) } : nil
             if let poster, FileManager.default.fileExists(atPath: poster.path),

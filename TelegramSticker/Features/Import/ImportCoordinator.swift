@@ -6,6 +6,7 @@ nonisolated struct BatchImportDraft: Codable, Sendable {
     let links: [String]
     var updating = false
     var restoringOriginal: Bool? = nil
+    var updateScope: PackUpdateScope? = nil
 }
 nonisolated struct ImportDraft: Codable, Sendable {
     let origin: URL
@@ -24,6 +25,7 @@ nonisolated struct ImportResult: Sendable {
     let installed: Int
     let total: Int
     let failed: Int
+    var downloadedStickerIDs: Set<String> = []
     var message: String {
         failed == 0 ? "\(installed)개를 설치했어요. 키보드에서 팩을 선택해 보세요." :
             "\(total)개 중 \(installed)개를 설치했어요. 실패한 \(failed)개는 다시 시도할 수 있어요."
@@ -84,6 +86,10 @@ actor ImportCoordinator {
                             failed: installed.pendingStickerIDs?.count ?? 0)
     }
 
+    func installedPack(named name: String) async throws -> PackManifestV1? {
+        try await writer.pack(id: "telegram-" + name)
+    }
+
     /// One lease protects the batch from cache clearing and other imports. Each
     /// pack gets its own child cache so its cleanup cannot delete a sibling's files.
     func beginBatch(links: [String], origin: URL, updating: Bool) async throws -> URL {
@@ -112,17 +118,28 @@ actor ImportCoordinator {
     @discardableResult
     func install(_ pack: RemotePack, client: WorkerClient,
                  updating: Bool = false, onlyIDs: Set<String>? = nil, restoringOriginal: Bool = false,
+                 expectedRevision: String? = nil,
+                 updateScope: PackUpdateScope = .all,
                  progress: @escaping @Sendable (ImportProgress) async -> Void) async throws -> ImportResult {
         try pack.validate(requestedName: pack.name)
         let existing = try await writer.pack(id: "telegram-" + pack.name)
+        if let expectedRevision, existing?.revision != expectedRevision { throw LibraryError.invalidOrder }
         if updating, existing == nil { throw LibraryError.invalidOrder }
         if updating, pack.refreshed != true || pack.fetchedAt == nil { throw StickerImportError.refreshUnsupported }
         if let existing, !updating, existing.pendingStickerIDs?.isEmpty != false { throw LibraryError.duplicatePack }
         guard pack.stickerType == "regular", updating || !pack.installableStickers.isEmpty else { throw StickerImportError.noStaticStickers }
         let oldByID = Dictionary(uniqueKeysWithValues: (existing?.stickers ?? []).map { ($0.id, $0) })
         let reusable: Set<String>
-        if updating, !restoringOriginal, let existing { reusable = try await writer.reusableStickerIDs(in: existing) } else { reusable = [] }
-        let requestedIDs = updating ? pack.installableStickers.filter { oldByID[$0.id]?.sourceFormat != $0.format || !reusable.contains($0.id) }.map(\.id)
+        let scope = restoringOriginal ? PackUpdateScope.all : updateScope
+        if updating, !restoringOriginal, scope == .all, let existing { reusable = try await writer.reusableStickerIDs(in: existing) } else { reusable = [] }
+        let requestedIDs = updating ? pack.installableStickers.filter { sticker in
+            switch scope {
+            case .all: oldByID[sticker.id]?.sourceFormat != sticker.format || !reusable.contains(sticker.id)
+            case .additions: oldByID[sticker.id] == nil
+            case .deletions: false
+            case .changes: oldByID[sticker.id] != nil && oldByID[sticker.id]?.sourceFormat != sticker.format
+            }
+        }.map(\.id)
             : existing?.pendingStickerIDs ?? pack.installableStickers.map(\.id)
         let requested = Set(requestedIDs)
         let candidates = pack.installableStickers.filter { requested.contains($0.id) }
@@ -131,6 +148,7 @@ actor ImportCoordinator {
         var cachePack = pack; cachePack.fetchedAt = nil; cachePack.refreshed = nil
         var signature = try encoder.encode(cachePack)
         if restoringOriginal { signature.append(contentsOf: "restore-original-v1".utf8) }
+        if updating { signature.append(contentsOf: scope.rawValue.utf8) }
         signature.append(contentsOf: client.configuration.origin.absoluteString.utf8)
         if candidates.contains(where: { $0.format != "static" }) {
             // Do not reuse GIFs produced before timing correction/frame sampling changes.
@@ -141,7 +159,7 @@ actor ImportCoordinator {
         let eligible = candidates.filter { onlyIDs == nil || onlyIDs!.contains($0.id) || FileManager.default.fileExists(atPath: directory.appendingPathComponent($0.id + ".png").path) }
         do {
             let result = try await downloadAndPublish(pack, existing: existing, requestedIDs: requestedIDs,
-                candidates: eligible, client: client, directory: directory, updating: updating, progress: progress)
+                candidates: eligible, client: client, directory: directory, updating: updating, updateScope: scope, progress: progress)
             await ImportJobCache.shared.end(root: root)
             return result
         } catch {
@@ -153,18 +171,30 @@ actor ImportCoordinator {
     private func downloadAndPublish(_ pack: RemotePack, existing: PackManifestV1?, requestedIDs: [String],
                                     candidates: [RemoteSticker], client: WorkerClient,
                                     directory: URL, updating: Bool,
+                                    updateScope: PackUpdateScope,
                                     progress: @escaping @Sendable (ImportProgress) async -> Void) async throws -> ImportResult {
         let converter = self.converter
         var finished: [String: DownloadOutcome] = [:]
         let previousCount = existing?.stickers.count ?? 0
-        let total = updating ? pack.stickers.count : existing?.originalCount ?? pack.stickers.count
+        let remoteIDs = Set(pack.stickers.map(\.id))
+        let total: Int
+        if updating {
+            switch updateScope {
+            case .all: total = pack.stickers.count
+            case .additions: total = previousCount + requestedIDs.count
+            case .deletions: total = existing?.stickers.filter { remoteIDs.contains($0.id) }.count ?? 0
+            case .changes: total = previousCount
+            }
+        } else { total = existing?.originalCount ?? pack.stickers.count }
         // Updated items replace old items; counting the whole old pack and then
         // adding new downloads would reach 100% before those downloads finish.
         let readyCount = updating ? max(0, total - requestedIDs.count) : previousCount
         var failures = await ImportFailureStore.shared.load(name: pack.name)
-        failures.removeAll { !requestedIDs.contains($0.id) }
+        if updating, updateScope != .all {
+            failures.removeAll { requestedIDs.contains($0.id) || (updateScope == .deletions && !remoteIDs.contains($0.id)) }
+        } else { failures.removeAll { !requestedIDs.contains($0.id) } }
         for id in requestedIDs where !pack.stickers.contains(where: { $0.id == id }) && !failures.contains(where: { $0.id == id }) {
-            failures.append(ImportFailure(id: id, format: "unknown", stage: "조회", code: "asset_unavailable", message: "원본 팩에서 항목을 찾을 수 없어요. 팩 업데이트 확인로 목록을 다시 맞출 수 있어요.", retryable: false))
+            failures.append(ImportFailure(id: id, format: "unknown", stage: "조회", code: "asset_unavailable", message: "원본 팩에서 항목을 찾을 수 없어요. 팩을 업데이트하면 목록을 다시 맞출 수 있어요.", retryable: false))
         }
         let candidateIDs = Set(candidates.map(\.id))
         failures.removeAll { candidateIDs.contains($0.id) }
@@ -197,8 +227,11 @@ actor ImportCoordinator {
                                 }
                                 let source = directory.appendingPathComponent(sticker.id + ".source")
                                 defer { try? FileManager.default.removeItem(at: source) }
+                                let downloadStarted = ContinuousClock.now
                                 _ = try await client.assetFile(pack: pack.name, sticker: sticker, destination: source)
+                                await DownloadDiagnostics.shared.record("DOWNLOAD pack=\(pack.name) stickerID=\(sticker.id) elapsed=\(downloadStarted.duration(to: .now))")
                                 // Download the next files while one animation is being converted.
+                                let conversionQueued = ContinuousClock.now
                                 try await Self.conversionGate.acquire()
                                 defer { Task { await Self.conversionGate.release() } }
                                 try Task.checkCancellation()
@@ -209,6 +242,8 @@ actor ImportCoordinator {
                                 await DownloadDiagnostics.shared.record("PIPELINE pack=\(pack.name) stickerID=\(sticker.id) format=\(sticker.format) dimensions=\(sticker.width)x\(sticker.height) declaredBytes=\(sticker.fileSize.map(String.init) ?? "unknown") receivedBytes=\(original.count) magic16=\(fileMagic) attempt=\(retryAttempt + 1)/6 stage=convert")
                                 try Task.checkCancellation()
                                 stage = "변환"
+                                let conversionStarted = ContinuousClock.now
+                                await DownloadDiagnostics.shared.record("CONVERSION_READY pack=\(pack.name) stickerID=\(sticker.id) queueWait=\(conversionQueued.duration(to: conversionStarted))")
                                 let png: Data
                                 var qualityLabel: String?
                                 if animated {
@@ -230,6 +265,7 @@ actor ImportCoordinator {
                                     png = converted.poster
                                     qualityLabel = converted.quality ?? qualityLabel
                                 } else { png = try await converter.png(from: original) }
+                                await DownloadDiagnostics.shared.record("CONVERTED pack=\(pack.name) stickerID=\(sticker.id) elapsed=\(conversionStarted.duration(to: .now))")
                                 try Task.checkCancellation()
                                 stage = "저장"
                                 try png.write(to: output, options: .atomic)
@@ -281,22 +317,57 @@ actor ImportCoordinator {
                 if let result = finished[sticker.id], let file = result.file {
                     available[sticker.id] = LocalStickerInput(id: sticker.id, name: sticker.emoji ?? "스티커 \(index + 1)",
                         url: file, sourceFormat: sticker.format, animationURL: result.animation, conversionQuality: result.quality)
+                } else if updating && (updateScope == .all || updateScope == .changes), var input = available[sticker.id] {
+                    input = LocalStickerInput(id: input.id, name: sticker.emoji ?? "스티커 \(index + 1)",
+                        url: input.url, sourceFormat: input.sourceFormat, animationURL: input.animationURL,
+                        conversionQuality: input.conversionQuality, reusableFiles: input.reusableFiles)
+                    available[sticker.id] = input
                 }
             }
-            // Keep the source order, preserving installed items removed from the remote pack.
-            let ordered = pack.stickers.compactMap { available.removeValue(forKey: $0.id) }
-            let retained = updating ? [] : oldInputs.filter { available[$0.id] != nil }
-            try await writer.install(id: "telegram-" + pack.name, title: pack.title, stickers: ordered + retained,
-                originalCount: total, telegramName: pack.name, pendingStickerIDs: pending, replacingRevision: existing?.revision, mirroringRemote: updating,
+            let published: [LocalStickerInput]
+            let publicationPending: [String]
+            if updating, updateScope != .all {
+                switch updateScope {
+                case .additions:
+                    var merged = oldInputs
+                    let previousIDs = Set(oldInputs.map(\.id))
+                    for (offset, sticker) in pack.stickers.enumerated() where finished[sticker.id] != nil {
+                        guard let input = available[sticker.id] else { continue }
+                        let anchor = pack.stickers.dropFirst(offset + 1).first { previousIDs.contains($0.id) }
+                        if let anchor, let position = merged.firstIndex(where: { $0.id == anchor.id }) {
+                            merged.insert(input, at: position)
+                        } else { merged.append(input) }
+                    }
+                    published = merged
+                case .deletions:
+                    published = oldInputs.filter { remoteIDs.contains($0.id) }
+                case .changes:
+                    published = pack.stickers.compactMap { available[$0.id] } + oldInputs.filter { !remoteIDs.contains($0.id) }
+                case .all: published = [] // Handled by the full-update branch below.
+                }
+                publicationPending = (existing?.pendingStickerIDs ?? []).filter {
+                    finished[$0] == nil && (updateScope != .deletions || remoteIDs.contains($0))
+                }
+            } else {
+                let ordered = pack.stickers.compactMap { available.removeValue(forKey: $0.id) }
+                let retained = updating ? [] : oldInputs.filter { available[$0.id] != nil }
+                published = ordered + retained
+                publicationPending = pending
+            }
+            let publicationTotal = updating && updateScope != .all ? published.count + publicationPending.count : total
+            let title = updating && (updateScope == .additions || updateScope == .deletions) ? existing?.title ?? pack.title : pack.title
+            try await writer.install(id: "telegram-" + pack.name, title: title, stickers: published,
+                originalCount: publicationTotal, telegramName: pack.name, pendingStickerIDs: publicationPending, replacingRevision: existing?.revision, mirroringRemote: updating,
                 lastCheckedAt: updating ? pack.fetchedAt.map { Date(timeIntervalSince1970: $0) } : existing?.lastCheckedAt, syncOrigin: syncOrigin)
         } else if let existing {
             guard try await writer.pack(id: existing.id)?.revision == existing.revision else { throw LibraryError.invalidOrder }
         }
         if pending.isEmpty { try? FileManager.default.removeItem(at: directory) }
         if pending.isEmpty { try? FileManager.default.removeItem(at: root.appendingPathComponent("draft.json")) }
-        await progress(ImportProgress(completed: updating ? pack.stickers.count : previousCount + finished.count,
+        await progress(ImportProgress(completed: updating ? total : previousCount + finished.count,
                                       total: total, failed: pending.count, applied: pending.isEmpty))
-        return ImportResult(installed: updating ? pack.stickers.count : previousCount + finished.count, total: total, failed: pending.count)
+        return ImportResult(installed: updating ? total : previousCount + finished.count, total: total, failed: pending.count,
+            downloadedStickerIDs: Set(finished.keys.map { "telegram-" + pack.name + "." + $0 }))
     }
 }
 

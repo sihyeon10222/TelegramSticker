@@ -9,9 +9,11 @@ struct LibraryView: View {
     @Environment(\.horizontalSizeClass) private var systemSizeClass
     @Environment(\.activeAppTab) private var activeTab
     @Environment(\.libraryHomeRequest) private var homeRequest
+    @Environment(\.libraryUpdatesRequest) private var updatesRequest
     @State private var model = LibraryModel()
     @State private var selected: String?
     @State private var importRequest: PackImportRequest?
+    @State private var packUpdatesRequest: PackUpdatesRequest?
     @State private var editMode = EditMode.inactive
     @State private var bulkSelected = Set<String>()
     @State private var optimizationRequest: OptimizationRequest?
@@ -106,7 +108,7 @@ struct LibraryView: View {
                 Text(pack.title).font(.body.weight(.semibold)).lineLimit(1).truncationMode(.tail)
                     .accessibilityLabel(pack.title)
                 Text("스티커 \(pack.stickers.count)개").font(.caption).foregroundStyle(.secondary)
-                if let checked = pack.lastCheckedAt {
+                if let checked = PackUpdateService.shared.entries[pack.id]?.checkedAt ?? pack.lastCheckedAt {
                     Text("최근 확인 \(checked.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).locale(Locale(identifier: "ko_KR"))))")
                         .font(.caption2).foregroundStyle(.secondary)
                         .lineLimit(1).minimumScaleFactor(0.85)
@@ -148,7 +150,50 @@ struct LibraryView: View {
     }
 
     private func updatePack(_ pack: PackManifestV1) {
-        importRequest = PackImportRequest(name: pack.telegramName, updating: true, title: pack.title)
+        packUpdatesRequest = PackUpdatesRequest(packIDs: [pack.id], checkOnOpen: true)
+    }
+
+    private var availableUpdates: [PackUpdateEntry] {
+        model.packs.compactMap { PackUpdateService.shared.entries[$0.id] }.filter { $0.difference.hasChanges }
+    }
+
+    @ViewBuilder private var updateSection: some View {
+        let service = PackUpdateService.shared
+        if !availableUpdates.isEmpty {
+            Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    if service.isChecking { ProgressView(service.status ?? "업데이트 확인 중") }
+                    if !availableUpdates.isEmpty {
+                        Text("업데이트할 팩이 \(availableUpdates.count)개 있어요").font(.headline)
+                        HStack {
+                            Button("업데이트하기") {
+                                Task {
+                                    guard let writer = model.writer else { return }
+                                    if let session = await ImportModel.beginUpdates(availableUpdates, writer: writer) {
+                                        ImportActivity.shared.presentedImport = session
+                                    } else {
+                                        model.message = "업데이트를 시작하지 못했어요. 진행 중인 작업과 연결 상태를 확인해 주세요."
+                                    }
+                                }
+                            }
+                            .appGlassButton(prominent: true)
+                            .disabled(ImportActivity.shared.count > 0 || service.isChecking || availableUpdates.contains { service.errors[$0.id] != nil })
+                            Button("변경 내역 보기") { packUpdatesRequest = PackUpdatesRequest() }.appGlassButton()
+                        }
+                    }
+                    if !service.errors.isEmpty {
+                        Button("조회 실패 \(service.errors.count)팩 보기") { packUpdatesRequest = PackUpdatesRequest() }
+                            .font(.caption).foregroundStyle(.red)
+                    }
+                }.padding(.vertical, 4)
+            }
+        }
+    }
+
+    private func refreshUpdates() async {
+        await model.refresh()
+        await PackUpdateService.shared.check(packs: model.packs, notify: true)
+        await model.refresh()
     }
 
     private func toggleSelection(sharing share: Bool) {
@@ -177,9 +222,7 @@ struct LibraryView: View {
     private var packEditingButtons: some View {
             HStack(spacing: 8) {
                 Button {
-                    let links = model.packs.filter { bulkSelected.contains($0.id) }
-                        .compactMap { $0.telegramName.map { "https://t.me/addstickers/" + $0 } }
-                    importRequest = PackImportRequest(name: nil, updating: true, links: links)
+                    packUpdatesRequest = PackUpdatesRequest(packIDs: bulkSelected, checkOnOpen: true)
                 } label: { actionLabel("업데이트 확인", icon: "arrow.clockwise") }
                 .disabled(!model.packs.contains { bulkSelected.contains($0.id) && $0.telegramName != nil } || ImportActivity.shared.count > 0)
                 .appGlassButton(prominent: true, tint: .blue).accessibilityIdentifier("updateSelectedPacks")
@@ -232,6 +275,7 @@ struct LibraryView: View {
         let phoneLandscapeSidebar = wideLayout && UIDevice.current.userInterfaceIdiom == .phone
         NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: $compactColumn) {
             List(selection: listSelection) {
+                updateSection
                 if let message = model.message {
                     Section { Text(message).foregroundStyle(.secondary).accessibilityIdentifier("libraryMessage") }
                 }
@@ -413,7 +457,7 @@ struct LibraryView: View {
                 }
             }
             .overlay { if model.isBusy { ProgressView("저장 중") } }
-            .refreshable { await model.refresh() }
+            .refreshable { await refreshUpdates() }
             .navigationSplitViewColumnWidth(min: sidebarMinimum, ideal: sidebarMinimum, max: sidebarMaximum)
             .overlay(alignment: .trailing) {
                 if wideLayout {
@@ -463,6 +507,9 @@ struct LibraryView: View {
         .sheet(item: $importRequest, onDismiss: { Task { await model.refresh() } }) { request in
             if let writer = model.writer { ImportView(writer: writer, initialPackName: request.name, updating: request.updating, initialLinks: request.links, initialPackTitle: request.title) }
         }
+        .sheet(item: $packUpdatesRequest, onDismiss: { Task { await model.refresh() } }) { request in
+            PackUpdatesView(request: request)
+        }
         .sheet(item: $optimizationRequest, onDismiss: { Task { await model.refresh() } }) { request in
             OptimizationView(request: request)
         }
@@ -471,6 +518,9 @@ struct LibraryView: View {
             selected = nil
             compactColumn = .sidebar
             columnVisibility = .all
+        }
+        .onChange(of: updatesRequest, initial: true) { _, value in
+            if value > 0 { packUpdatesRequest = PackUpdatesRequest() }
         }
         .onChange(of: activeTab) { _, tab in
             if tab != .library { resetSelection() }
@@ -496,7 +546,9 @@ struct LibraryView: View {
             Group {
             if let pack = model.packs.first(where: { $0.id == selected }) {
                 InstalledPackView(landscape: landscape, pack: pack, stickers: model.stickers(in: pack), update: {
-                    importRequest = PackImportRequest(name: pack.telegramName, updating: true, title: pack.title)
+                    updatePack(pack)
+                }, refresh: {
+                    await refreshUpdates()
                 }, retry: {
                     importRequest = PackImportRequest(name: pack.telegramName, updating: false)
                 }, optimize: { ids in

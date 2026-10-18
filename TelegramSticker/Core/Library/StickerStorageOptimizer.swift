@@ -69,6 +69,7 @@ extension LibraryWriter {
                     let oldPNG = try reader.file(sticker.pngPath)
                     var png = oldPNG
                     var gif = try sticker.animationPath.map { try reader.file($0) }
+                    let oldGIF = gif
                     var quality = sticker.conversionQuality
                     if eligible && quality?.hasPrefix(profile.label) != true {
                         let candidate = temporary.appendingPathComponent(sticker.id + ".png")
@@ -84,7 +85,9 @@ extension LibraryWriter {
                         if smaller { changed = true; quality = profile.label + (keptOriginal ? " · 일부 원본 유지" : "") }
                     }
                     inputs.append(LocalStickerInput(id: sticker.id, name: sticker.name, url: png,
-                        sourceFormat: sticker.sourceFormat ?? "png", animationURL: gif, conversionQuality: quality))
+                        sourceFormat: sticker.sourceFormat ?? "png", animationURL: gif, conversionQuality: quality,
+                        reusableFiles: png == oldPNG && gif == oldGIF && quality == sticker.conversionQuality
+                            ? ReusableStickerFiles(reader: reader, packID: pack.id, revision: pack.revision, record: sticker) : nil))
                     }
                 }
                 guard changed else { continue }
@@ -190,7 +193,8 @@ extension LibraryWriter {
                 let before = try StickerStorageOptimizer.bytes(oldDirectory)
                 let inputs = try optimized.stickers.map { record in
                     LocalStickerInput(id: record.id, name: record.name, url: try shadow.file(record.pngPath), sourceFormat: record.sourceFormat ?? "png",
-                        animationURL: try record.animationPath.map { try shadow.file($0) }, conversionQuality: record.conversionQuality)
+                        animationURL: try record.animationPath.map { try shadow.file($0) }, conversionQuality: record.conversionQuality,
+                        reusableFiles: ReusableStickerFiles(reader: shadow, packID: optimized.id, revision: optimized.revision, record: record))
                 }
                 try install(id: original.id, title: original.title, stickers: inputs, originalCount: original.originalCount,
                     telegramName: original.telegramName, pendingStickerIDs: original.pendingStickerIDs,

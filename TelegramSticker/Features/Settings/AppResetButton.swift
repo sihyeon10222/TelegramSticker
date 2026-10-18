@@ -32,6 +32,8 @@ struct AppResetButton: View {
             defer { resetting = false; ImportActivity.shared.count -= 1 }
             do {
                 await LibrarySyncService.shared.stopForReset()
+                try await PackUpdateService.shared.reset()
+                WorkNotifications.shared.pendingPackUpdates = false
                 SyncDownloadCoordinator.shared.reconcile()
                 guard let writer = LibraryWriter.shared else { throw LibraryError.unavailable }
                 OptimizationCenter.shared.current?.removeDrafts(deleteFiles: false)

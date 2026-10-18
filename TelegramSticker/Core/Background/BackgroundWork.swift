@@ -11,10 +11,11 @@ final class BackgroundWork {
     private let logger = Logger(subsystem: "com.sihyeon.TelegramSticker", category: "BackgroundWork")
     var notice: String?
     enum Kind: Sendable {
-        case download, update, restoreOriginal, optimizationPreparation, optimizationApply
+        case download, update, updateCheck, restoreOriginal, optimizationPreparation, optimizationApply
         var sendsCompletion: Bool {
             switch self {
             case .download, .update, .restoreOriginal, .optimizationPreparation, .optimizationApply: true
+            case .updateCheck: false
             }
         }
     }

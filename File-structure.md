@@ -123,6 +123,7 @@ TelegramSticker/                         # 저장소 루트
 | 요청 제어 | `TelegramSticker/Core/Networking/DownloadRequestBudget.swift`, `TelegramSticker/Core/RequestGate.swift` |
 | 변환 | `TelegramSticker/Core/Media/TGSConverter.swift`, `TelegramSticker/Core/Media/WebMConverter.swift`, `TelegramSticker/Core/Media/StaticImageConverter.swift` |
 | 설치 데이터·공유 읽기 | `TelegramSticker/Core/Library/LibraryWriter.swift`, `Shared/Storage/LibraryReader.swift` |
+| 업데이트 확인·차이·결과 저장 | `TelegramSticker/Core/Library/PackUpdateService.swift`, `TelegramSticker/Features/Library/PackUpdatesView.swift`, `TelegramSticker/UI/PackUpdateChangesView.swift` |
 | 용량 최적화 | `TelegramSticker/Features/Optimization/OptimizationSession.swift`, `TelegramSticker/Core/Library/StickerStorageOptimizer.swift` |
 | 캐시·초기화 | `TelegramSticker/Features/Settings/StorageSettingsView.swift`, `TelegramSticker/Core/Library/AppDisposableCache.swift` |
 | 갤러리 | `TelegramSticker/Features/Gallery/GalleryView.swift`, `TelegramSticker/Features/Gallery/GalleryPreviewStore.swift` |
@@ -517,3 +518,29 @@ iOS 스와이프 깜빡임 보정 빌드·설치: iOS Debug 빌드 성공. 연�
 
 
 2026-10-18 배포 서명 보정 완료: Catalyst Release arm64/x86_64 정상 서명 빌드 성공. 기존 팀 RKQCX265PQ·App Group entitlement·embedded.provisionprofile 및 deep/strict 서명 확인. 이전 .build/MacDistribution의 앱·ZIP과 ~/Applications/StickerBridge.app을 정상 개발 서명 빌드로 교체하고 설치 앱 실행 완료. 기존 라이브러리 데이터·경로는 수정하지 않았다. 앱 소스 변경이 없어 iOS 재빌드·재설치는 하지 않았다. 테스트·수동 UI 확인은 실행하지 않았으며 임의 Mac 배포용 Developer ID 내보내기는 인증서 부재로 미수행이다.
+
+2026-10-18 스티커팩 업데이트 흐름: 앱 전용 Core/Library/PackUpdateService.swift는 메타데이터만으로 추가·삭제·변경·미설치 복구·이름·순서 차이를 계산하고 팩별 요청을 합친다. 사용자가 시작한 전체 조회는 화면 수명과 분리한 Task 및 기존 BackgroundWork의 updateCheck로 진행한다. Caches/PackUpdateChecks/<telegramName>.json의 원본 조회 결과를 재실행 시 현재 설치 revision과 다시 비교하며 앱 초기화에서 지운다. HTTP API·서버 제한·Shared 저장 형식은 변경하지 않는다.
+
+Features/Library/PackUpdatesView.swift는 단일·선택·전체 변경 내역과 명시적 업데이트 실행을, UI/PackUpdateChangesView.swift는 가져오기 화면과 공통으로 쓰는 이전/이후 이미지 표시를 담당한다. 두 새 화면과 서비스는 TelegramSticker 파일 시스템 동기화 그룹을 통해 앱 타깃에만 포함되며 키보드에는 포함하지 않는다. 목록·상세의 당겨서 새로고침은 전체 Telegram 팩을 확인하고, 목록 상단에서 업데이트 개수·실행·내역을 제공한다. WorkNotifications의 packUpdates 목적지를 ContentView가 내 스티커 팩 목록과 변경 내역으로 연결한다. 업데이트가 있으면 전체 조회를 끝낼 때마다 알린다.
+
+LibraryWriter의 LocalStickerInput은 앱 내부 ReusableStickerFiles로 기존 PNG·썸네일·GIF·키보드 재생 파일의 안전한 경로를 검증하고 새 revision에 그대로 복사한다. ImportCoordinator는 새로 적용한 파일의 스티커 ID를 ImportResult로 반환하고 메타데이터 변경에도 항목 이름을 갱신한다. 업데이트 일괄 적용은 사용자의 팩 정렬을 바꾸지 않는다. 최적화 제안은 이번에 받은 ID만 전달하며, StickerStorageOptimizer의 준비·적용에서도 대상 밖 파일과 품질을 재사용한다. 파일·변환 결과의 기존 App Group 게시 경로, revision 원자성 및 키보드 읽기 경계는 유지한다.
+
+InstalledPackView의 핀치·Catalyst 단축키 열 수는 앱 전용 UserDefaults의 library.stickerGrid.columns.v1에 2~10 범위로 기기별·모든 팩 공통 저장한다. 저장 전 기본값은 compact 4/regular 5열이며 저장 후 회전·팩 전환·재실행으로 초기화하지 않는다. 리소스 추가·이동 및 번들 조회 경로 변경은 없다. 테스트와 수동 UI 검증은 실행하지 않는다.
+
+업데이트 흐름 빌드·설치: 최종 iOS Debug 및 Catalyst arm64 Release 빌드 성공. 세 새 Swift 파일이 앱 타깃에서 컴파일됨을 확인했고 기존 키보드·리소스 타깃 경계를 유지했다. 연결된 iPhone 15 Pro에 기존 데이터를 유지해 최신 앱 덮어쓰기 설치 완료. 설치 직후 기기가 unavailable로 바뀌어 CoreDevice 오류 4016으로 실행은 연결 복구 대기 상태다. 자동 테스트·수동 UI 검증 및 실제 성능 측정은 실행하지 않았다.
+
+2026-10-18 업데이트 선택 적용 후속: LibraryView의 목록 상단 업데이트 안내는 미적용 차이가 있는 팩이 한 개 이상일 때만 표시한다. 확인 중·업데이트 없음·완료 상태만으로 안내 섹션을 유지하지 않는다. PackUpdatesView는 업데이트가 남은 팩만 카드로 표시하며 조회 실패는 별도 접기 영역에 둔다. 팩 제목 오른쪽 업데이트는 해당 팩 전체 적용, 추가·삭제·변경 버튼은 해당 종류만 적용하며, 상단 파란 모두 업데이트는 표시 대상 팩 전체를 바로 적용한다. 재조회는 창의 당겨서 새로고침과 실패 항목 다시 확인으로 제공한다.
+
+Core/Library의 PackUpdateScope(all/additions/deletions/changes)는 앱 내부 적용 범위를 정의한다. ImportModel은 선택 범위를 ImportCoordinator 및 재개용 BatchImportDraft.updateScope에 전달하며 이전 draft는 all로 읽는다. 추가만 적용하면 기존 스티커·팩 이름·기존 상대 순서를 유지하고 원본의 다음 기존 스티커 앞에 새 항목을 삽입한다. 삭제만 적용하면 원본에서 없어진 항목만 제거한다. 변경만 적용하면 공통 항목의 메타데이터·형식·순서와 팩 이름을 반영하고 미선택 추가·삭제는 보존한다. 실제 원본 조회 메타데이터는 전체 그대로 유지해 부분 적용 뒤 남은 차이와 알림 개수를 다시 계산한다. 미선택 실패 기록과 pending 상태를 유지하며, 키보드·HTTP API·설치 manifest 형식·리소스·타깃 경계 변경은 없다. 테스트 및 수동 UI 검증은 실행하지 않는다.
+
+업데이트 선택 적용 빌드·설치 완료: 최종 iOS Debug 및 Catalyst arm64 Release 빌드 성공. 연결 복구된 iPhone 15 Pro에 기존 데이터 유지 덮어쓰기 설치 및 최신 앱 실행 완료. 앞선 실행 대기 상태는 해소됐다. 자동 테스트·수동 UI 검증은 실행하지 않았다.
+
+2026-10-18 업데이트 종류별 적용 버튼 제거: PackUpdatesView의 추가·삭제·변경 개별 적용 버튼과 해당 화면의 범위 선택 전달을 제거했다. 팩 제목 오른쪽 업데이트와 상단 모두 업데이트, 종류별 변경 내역·미리보기는 유지한다. 이전 재개 작업을 위한 내부 범위 읽기는 유지하며 파일·타깃·리소스·저장 형식 변경은 없다. 테스트는 실행하지 않는다.
+
+종류별 버튼 제거 빌드·설치: iOS Debug 및 Catalyst arm64 Release 빌드 성공. 연결된 iPhone 15 Pro에 데이터 유지 덮어쓰기 설치·실행 완료. 테스트·수동 UI 검증은 실행하지 않았다.
+
+2026-10-18 업데이트 미리보기 GIF·요약 정리: UI/PackUpdateChangesView.swift는 팩 제목 아래 중복된 작은 추가·삭제·변경 개수 요약을 제거하고 종류별 섹션 제목·이미지는 유지한다. 설치된 이전/삭제 항목은 안전한 경로로 기존 playback GIF(없으면 원본 GIF)를 연결하고, 추가/변경 후 항목은 기존 GalleryPreviewStore 캐시·변환·재생을 재사용한다. 화면이 활성일 때 재생하고 동작 줄이기 설정은 존중한다. 메타데이터 전체 업데이트 확인에는 미디어 로딩을 추가하지 않으며 표시된 미리보기에서만 준비한다.
+
+갤러리와 업데이트 두 기능에서 재사용하는 GalleryStickerPreview.swift를 Features/Gallery/에서 UI/로 이동했다. 이동은 원본 소스 변경 없이 수행했으며 앱 파일 시스템 동기화 그룹의 동일 타깃을 유지한다. GalleryPreviewStore의 설치 파일 재사용은 원본 형식이 일치할 때만 허용한다. 리소스·번들 조회·Shared·키보드·설치 라이브러리 저장 경로 변경은 없다. 사용자 지시에 따라 앞으로 Xcode 작업은 연결된 모든 지원 기기에 빌드·설치하며, 이번 작업은 iPhone·iPad·Mac 모두 설치 대상으로 한다. 테스트 및 수동 UI 검증은 실행하지 않는다.
+
+GIF 미리보기·요약 정리 완료: iPhone 15 Pro와 iPad Pro 12.9 M2 각각의 실기기 목적지 Debug 빌드 및 Catalyst arm64 Release 빌드 성공. 두 실기기에 데이터 유지 덮어쓰기 설치·실행 완료. Mac은 기존 ~/Applications/StickerBridge.app을 정상 Xcode 서명 빌드로 교체하고 실행했으며 deep/strict 서명 확인을 완료했다. 이전 Mac 앱 번들은 .build/MacInstallBackup.*에 보관했고 App Group·사용자 데이터는 수정하지 않았다. 이동한 GalleryStickerPreview.swift가 앱 타깃에서 컴파일됨을 확인했다. 테스트 및 수동 UI 검증은 실행하지 않았다.

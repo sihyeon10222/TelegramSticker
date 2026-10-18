@@ -15,6 +15,10 @@ final class ImportModel: Identifiable {
     private var batchLookupFailures = 0
     private var batchApplied = false
     private var newlyInstalledIDs = Set<String>()
+    private var newlyDownloadedStickerIDs = Set<String>()
+    var approvedUpdates: [String: PackUpdateEntry] = [:]
+    var updateEntry: PackUpdateEntry?
+    var updateScope = PackUpdateScope.all
     var downloadSummary = "준비 중"
     var pack: RemotePack?
     var message: String?
@@ -40,6 +44,24 @@ final class ImportModel: Identifiable {
     private var backgroundID: String?
     init(writer: LibraryWriter, root: URL? = nil) { coordinator = ImportCoordinator(writer: writer, root: root) }
 
+    static func beginUpdates(_ entries: [PackUpdateEntry], writer: LibraryWriter, scope: PackUpdateScope = .all) async -> ImportModel? {
+        guard ImportActivity.shared.count == 0, !entries.isEmpty else { return nil }
+        let model = ImportModel(writer: writer)
+        model.updating = true
+        model.updateScope = scope
+        await model.configure()
+        guard model.client != nil, ImportActivity.shared.count == 0 else { return nil }
+        model.approvedUpdates = Dictionary(uniqueKeysWithValues: entries.map { ($0.remote.name, $0) })
+        model.link = "https://t.me/addstickers/" + entries[0].remote.name
+        model.additionalLinks = entries.dropFirst().map { AdditionalPackLink(value: "https://t.me/addstickers/" + $0.remote.name) }
+        if entries.count == 1 {
+            model.singleUpdateName = entries[0].remote.name
+            model.singleUpdateTitle = entries[0].remote.title
+        }
+        model.downloadBatch()
+        return model
+    }
+
     var installing: Bool { busy && backgroundID != nil }
     var inputLinks: [AdditionalPackLink] { [AdditionalPackLink(id: primaryLinkID, value: link)] + additionalLinks }
     var failedCount: Int { max(progress?.failed ?? 0, batchCounts.values.reduce(batchLookupFailures) { $0 + $1.failed }) }
@@ -48,7 +70,7 @@ final class ImportModel: Identifiable {
     func setInputLinks(_ rows: [AdditionalPackLink]) {
         guard !busy, let first = rows.first else { return }
         primaryLinkID = first.id; link = first.value; additionalLinks = Array(rows.dropFirst())
-        pack = nil; installed = false; result = nil
+        pack = nil; installed = false; result = nil; updateEntry = nil
     }
 
     private func incompleteLinks(_ links: [String]) async -> [String] {
@@ -66,7 +88,7 @@ final class ImportModel: Identifiable {
 
     private var completionDetail: String {
         let detail = message ?? downloadSummary
-        return !updating && !restoringOriginal && ((result?.installed ?? 0) > 0 || !newlyInstalledIDs.isEmpty)
+        return !restoringOriginal && (!(result?.downloadedStickerIDs.isEmpty ?? true) || !newlyDownloadedStickerIDs.isEmpty)
             ? detail + " 용량 최적화로 저장 공간을 줄여보세요." : detail
     }
 
@@ -103,19 +125,25 @@ final class ImportModel: Identifiable {
     func preview() {
         guard !busy, let client else { return }
         guard ImportActivity.shared.count == 0 else { message = "진행 중인 작업을 마친 뒤 이 팩의 업데이트 확인을 진행해 주세요."; return }
-        busy = true; installed = false; result = nil; message = nil; progress = nil; pack = nil
+        busy = true; installed = false; result = nil; message = nil; progress = nil; pack = nil; updateEntry = nil
         operation = Task {
             await DownloadDiagnostics.shared.run(title: "팩 미리보기 · \(link)") {
                 defer { busy = false }
                 do {
                     let name = try StickerLink.parse(link)
-                    let loaded = try await client.pack(name: name, refresh: updating)
+                    let loaded: RemotePack
+                    if updating, !restoringOriginal, let existing = try await coordinator.installedPack(named: name) {
+                        let entry = try await PackUpdateService.shared.check(existing, using: client)
+                        updateEntry = entry
+                        loaded = entry.remote
+                    } else { loaded = try await client.pack(name: name, refresh: updating) }
                     try Task.checkCancellation()
                     try await coordinator.saveDraft(ImportDraft(origin: client.configuration.origin, link: link, pack: loaded))
                     pack = loaded
                     try await loadInstalledStatus(loaded)
                     failures = await ImportFailureStore.shared.load(name: loaded.name)
-                    if let result { message = result.message }
+                    if let updateEntry { message = updateEntry.difference.summary }
+                    else if let result { message = result.message }
                 } catch is CancellationError { message = "취소했어요." }
                 catch { message = error.localizedDescription; DownloadDiagnostics.shared.record("FAIL " + DownloadDiagnostics.errorDetails(error)) }
             }
@@ -128,19 +156,31 @@ final class ImportModel: Identifiable {
         operation = Task {
             await DownloadDiagnostics.shared.run(title: (restoringOriginal ? "원본 복원" : updating ? "팩 업데이트" : "팩 다운로드") + " · " + pack.name) {
                 await GalleryPreviewStore.shared.cancelForForegroundWork()
-                backgroundID = await BackgroundWork.shared.begin(kind: restoringOriginal ? .restoreOriginal : updating ? .update : .download, title: updating ? "스티커 팩 업데이트 확인" : "스티커 설치") { self.cancel() }
+                backgroundID = await BackgroundWork.shared.begin(kind: restoringOriginal ? .restoreOriginal : updating ? .update : .download, title: restoringOriginal ? "스티커 원본 복원" : updating ? "스티커 팩 업데이트" : "스티커 설치") { self.cancel() }
                 var success = false
                 defer { BackgroundWork.shared.end(id: backgroundID, success: success, detail: completionDetail, cancelled: Task.isCancelled); backgroundID = nil; busy = false }
                 do {
+                    var expectedRevision: String?
+                    if updating, !restoringOriginal, let existing = try await coordinator.installedPack(named: pack.name) {
+                        let entry = PackUpdateEntry(installed: existing, remote: pack, checkedAt: updateEntry?.checkedAt ?? Date())
+                        updateEntry = entry
+                        guard entry.difference.hasChanges(in: updateScope) else { installed = true; message = "업데이트할 내용이 없어요."; success = true; return }
+                        expectedRevision = existing.revision
+                    }
                     try await coordinator.saveBatch(BatchImportDraft(origin: client.configuration.origin,
-                        links: ["https://t.me/addstickers/" + pack.name], updating: updating, restoringOriginal: restoringOriginal))
-                    let receipt = try await coordinator.install(pack, client: client, updating: updating, onlyIDs: onlyIDs, restoringOriginal: restoringOriginal) { value in
+                        links: ["https://t.me/addstickers/" + pack.name], updating: updating, restoringOriginal: restoringOriginal, updateScope: updateScope))
+                    let receipt = try await coordinator.install(pack, client: client, updating: updating, onlyIDs: onlyIDs, restoringOriginal: restoringOriginal, expectedRevision: expectedRevision, updateScope: updateScope) { value in
                         await self.updateProgress(value)
                     }
-                    result = receipt; installed = receipt.failed == 0; message = receipt.message; success = receipt.failed == 0
+                    result = receipt; installed = receipt.failed == 0; message = updating && receipt.failed == 0 ? "업데이트 완료" : receipt.message; success = receipt.failed == 0
+                    if let current = try? await coordinator.installedPack(named: pack.name) {
+                        await PackUpdateService.shared.didInstall(remote: pack, installed: current)
+                    }
                     if success { try await coordinator.saveBatch(BatchImportDraft(origin: client.configuration.origin, links: [])) }
                     ImportActivity.shared.libraryChangeID += 1
-                    if !updating && receipt.installed > 0 { ImportActivity.shared.suggestOptimization(packIDs: ["telegram-" + pack.name]) }
+                    if !restoringOriginal {
+                        ImportActivity.shared.suggestOptimization(packIDs: ["telegram-" + pack.name], stickerIDs: receipt.downloadedStickerIDs)
+                    }
                 } catch is CancellationError { message = "중단했어요. 다시 시도하면 준비된 파일을 재사용해요." }
                 catch { message = error.localizedDescription; DownloadDiagnostics.shared.record("FAIL " + DownloadDiagnostics.errorDetails(error)) }
                 failures = await ImportFailureStore.shared.load(name: pack.name)
@@ -162,18 +202,18 @@ final class ImportModel: Identifiable {
         batchStatuses = inputs.map { BatchPackStatus(id: $0.id, link: $0.value, title: $0.value) }
         batchCounts = [:]
         batchLookupReady = false
-        batchLookupFailures = 0; batchApplied = false; newlyInstalledIDs.removeAll()
+        batchLookupFailures = 0; batchApplied = false; newlyInstalledIDs.removeAll(); newlyDownloadedStickerIDs.removeAll()
         downloadSummary = "팩 목록 조회 중"
         let batchUpdating = updating
         busy = true; message = nil; pack = nil; progress = nil; result = nil
         operation = Task {
             await DownloadDiagnostics.shared.run(title: restoringOriginal ? "원본 일괄 복원" : updating ? "팩 일괄 업데이트" : "팩 일괄 다운로드") {
                 await GalleryPreviewStore.shared.cancelForForegroundWork()
-                backgroundID = await BackgroundWork.shared.begin(kind: restoringOriginal ? .restoreOriginal : updating ? .update : .download, title: restoringOriginal ? "스티커 원본 복원" : (updating ? "스티커 팩 일괄 업데이트 확인" : "스티커 팩 일괄 설치")) { self.cancel() }
+                backgroundID = await BackgroundWork.shared.begin(kind: restoringOriginal ? .restoreOriginal : updating ? .update : .download, title: restoringOriginal ? "스티커 원본 복원" : (updating ? "스티커 팩 일괄 업데이트" : "스티커 팩 일괄 설치")) { self.cancel() }
                 var success = false
                 defer { BackgroundWork.shared.end(id: backgroundID, success: success, detail: completionDetail, cancelled: Task.isCancelled); backgroundID = nil; busy = false }
                 do {
-                    try await coordinator.saveBatch(BatchImportDraft(origin: client.configuration.origin, links: links, updating: batchUpdating, restoringOriginal: restoringOriginal))
+                    try await coordinator.saveBatch(BatchImportDraft(origin: client.configuration.origin, links: links, updating: batchUpdating, restoringOriginal: restoringOriginal, updateScope: updateScope))
                     let directory = try await coordinator.beginBatch(links: links, origin: client.configuration.origin, updating: batchUpdating)
                     do {
                         var seen = Set<String>()
@@ -218,7 +258,7 @@ final class ImportModel: Identifiable {
                             try await group.waitForAll()
                         }
                         try Task.checkCancellation()
-                        try await coordinator.orderBatch(links: links)
+                        if !batchUpdating { try await coordinator.orderBatch(links: links) }
                         ImportActivity.shared.libraryChangeID += 1
                         success = batchLookupFailures == 0 && batchCounts.values.allSatisfy { $0.failed == 0 } && !batchStatuses.contains { $0.status.hasPrefix("실패") }
                         if success { try await coordinator.saveBatch(BatchImportDraft(origin: client.configuration.origin, links: [], updating: batchUpdating)) }
@@ -228,13 +268,13 @@ final class ImportModel: Identifiable {
                     } catch {
                         // The task group has joined all children before releasing
                         // the root lease, including when a user cancels the batch.
-                        try? await coordinator.orderBatch(links: links)
+                        if !batchUpdating { try? await coordinator.orderBatch(links: links) }
                         ImportActivity.shared.libraryChangeID += 1
                         await coordinator.endBatch(directory: directory, completed: false)
                         throw error
                     }
-                    message = success ? "선택한 팩을 모두 적용했어요." : "설치된 팩을 적용했어요. 실패한 팩은 다시 시도해 주세요."
-                    if !updating { ImportActivity.shared.suggestOptimization(packIDs: newlyInstalledIDs) }
+                    message = success ? (updating ? "업데이트 완료" : "선택한 팩을 모두 적용했어요.") : "설치된 팩을 적용했어요. 실패한 팩은 다시 시도해 주세요."
+                    if !restoringOriginal { ImportActivity.shared.suggestOptimization(packIDs: newlyInstalledIDs, stickerIDs: newlyDownloadedStickerIDs) }
                 } catch {
                     for index in batchStatuses.indices where batchStatuses[index].status == "대기 중" || batchStatuses[index].status == "다운로드 중" || batchStatuses[index].status == "팩 조회 중" || batchStatuses[index].status == "스티커 설치 중" || batchStatuses[index].status.hasPrefix("준비 ") {
                         batchStatuses[index].status = "중단됨 · 다시 시도 가능"
@@ -250,11 +290,32 @@ final class ImportModel: Identifiable {
         do {
             try Task.checkCancellation()
             batchStatuses[index].status = "팩 조회 중"
-            let remote = try await client.pack(name: name, refresh: updating)
+            let remote: RemotePack
+            if updating, !restoringOriginal, let approved = approvedUpdates[name] { remote = approved.remote }
+            else { remote = try await client.pack(name: name, refresh: updating) }
             try Task.checkCancellation()
             batchStatuses[index].title = remote.title
+            var targetCount = remote.stickers.count
+            if updating, !restoringOriginal {
+                guard let existing = try await coordinator.installedPack(named: name) else { throw LibraryError.invalidOrder }
+                let entry = PackUpdateEntry(installed: existing, remote: remote,
+                    checkedAt: remote.fetchedAt.map(Date.init(timeIntervalSince1970:)) ?? Date())
+                approvedUpdates[name] = entry
+                switch updateScope {
+                case .all: break
+                case .additions: targetCount = existing.stickers.count + entry.difference.added.count + entry.difference.recovery.count
+                case .deletions: targetCount = existing.stickers.count - entry.difference.removed.count
+                case .changes: targetCount = existing.stickers.count
+                }
+                if !entry.difference.hasChanges(in: updateScope) {
+                    batchStatuses[index].status = "업데이트할 내용이 없어요"
+                    batchCounts[index] = ImportProgress(completed: 0, total: 0, failed: 0, applied: true)
+                    reportBatchProgress()
+                    return nil
+                }
+            }
             batchStatuses[index].status = "대기 중"
-            batchCounts[index] = ImportProgress(completed: 0, total: remote.stickers.count, failed: 0)
+            batchCounts[index] = ImportProgress(completed: 0, total: targetCount, failed: 0)
             reportBatchProgress()
             return (index, remote)
         } catch is CancellationError { throw CancellationError() }
@@ -277,12 +338,19 @@ final class ImportModel: Identifiable {
                 batchCounts[index] = ImportProgress(completed: remote.stickers.count, total: remote.stickers.count, failed: 0, applied: true)
             } else {
                 batchStatuses[index].status = "다운로드 중"
-                let receipt = try await worker.install(remote, client: client, updating: updating, restoringOriginal: restoringOriginal) { value in
+                let receipt = try await worker.install(remote, client: client, updating: updating, restoringOriginal: restoringOriginal,
+                    expectedRevision: updating && !restoringOriginal ? approvedUpdates[remote.name]?.installed.revision : nil, updateScope: updateScope) { value in
                     await self.updateBatchProgress(index: index, value: value)
                 }
                 batchCounts[index] = ImportProgress(completed: receipt.installed, total: receipt.total, failed: receipt.failed, applied: receipt.failed == 0)
-                if !updating && receipt.installed > 0 { newlyInstalledIDs.insert("telegram-" + remote.name) }
-                batchStatuses[index].status = receipt.failed == 0 ? "설치 완료" : "자동 재시도 종료 · 실패 항목 확인 필요"
+                if let current = try? await worker.installedPack(named: remote.name) {
+                    await PackUpdateService.shared.didInstall(remote: remote, installed: current)
+                }
+                if !receipt.downloadedStickerIDs.isEmpty {
+                    newlyInstalledIDs.insert("telegram-" + remote.name)
+                    newlyDownloadedStickerIDs.formUnion(receipt.downloadedStickerIDs)
+                }
+                batchStatuses[index].status = receipt.failed == 0 ? (updating ? "업데이트 완료" : "설치 완료") : "자동 재시도 종료 · 실패 항목 확인 필요"
             }
         } catch is CancellationError { throw CancellationError() }
         catch {
@@ -294,7 +362,7 @@ final class ImportModel: Identifiable {
                     failed: max(0, counts.total - counts.completed))
             }
         }
-        do { try await coordinator.orderBatch(links: batchStatuses.map(\.link)) }
+        do { if !updating { try await coordinator.orderBatch(links: batchStatuses.map(\.link)) } }
         catch { DownloadDiagnostics.shared.record("팩 정렬 · \(error.localizedDescription)") }
         ImportActivity.shared.libraryChangeID += 1
         reportBatchProgress()
@@ -305,7 +373,7 @@ final class ImportModel: Identifiable {
         let completed = min(value.total, max(0, value.completed))
         batchCounts[index] = ImportProgress(completed: completed, total: value.total,
             failed: min(max(0, value.failed), max(0, value.total - completed)), applied: value.applied)
-        batchStatuses[index].status = value.applied ? "설치 완료" : (completed >= value.total ? "파일 적용 중" : "스티커 설치 중")
+        batchStatuses[index].status = value.applied ? (updating ? "업데이트 완료" : "설치 완료") : (completed >= value.total ? "파일 적용 중" : (updating ? "스티커 업데이트 중" : "스티커 설치 중"))
         reportBatchProgress()
     }
 
@@ -346,6 +414,7 @@ final class ImportModel: Identifiable {
         guard let first = links.first else { return false }
         updating = draft.updating
         restoringOriginal = draft.restoringOriginal == true
+        updateScope = draft.updateScope ?? .all
         link = first; additionalLinks = links.dropFirst().map { AdditionalPackLink(value: $0) }
         downloadBatch()
         return busy

@@ -12,9 +12,10 @@ final class ImportActivity {
     var presentedImport: ImportModel?
     var optimizationSuggestion: OptimizationRequest?
     var visibleImportIDs = Set<UUID>()
-    func suggestOptimization(packIDs: Set<String>) {
+    func suggestOptimization(packIDs: Set<String>, stickerIDs: Set<String>? = nil) {
         guard !packIDs.isEmpty else { return }
-        optimizationSuggestion = OptimizationRequest(packIDs: packIDs)
+        if let stickerIDs, stickerIDs.isEmpty { return }
+        optimizationSuggestion = OptimizationRequest(packIDs: packIDs, stickerIDs: stickerIDs)
     }
     func presentCurrent() { presentedImport = current }
 }

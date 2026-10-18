@@ -200,7 +200,7 @@ struct ImportView: View {
                         .minimumScaleFactor(0.85)
                         if !model.additionalLinks.isEmpty || PackLinkList.split(model.link).count > 1 || !model.batchStatuses.isEmpty || model.restoringOriginal {
                             Button { focusedLink = nil; model.downloadBatch() } label: {
-                                Label(model.restoringOriginal ? "입력한 팩 원본 복원" : (updating ? "입력한 팩 모두 업데이트 확인" : "입력한 팩 모두 설치"), systemImage: "arrow.down.circle").frame(maxWidth: .infinity)
+                                Label(model.restoringOriginal ? "입력한 팩 원본 복원" : (updating ? "모두 업데이트" : "입력한 팩 모두 설치"), systemImage: "arrow.down.circle").frame(maxWidth: .infinity)
                             }.appGlassButton(prominent: true).controlSize(.large)
                                 .disabled(model.busy || model.client == nil).accessibilityIdentifier("installBatch")
                             Text("입력한 팩을 동시에 다운로드해요. 한 팩이 실패해도 다른 팩은 계속하고, 이미 설치한 팩과 중복 링크는 건너뛰어요.")
@@ -221,14 +221,16 @@ struct ImportView: View {
                             Text("마스크·커스텀 이모지 팩은 설치하지 않아요.")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
+                        if !updating || model.restoringOriginal || model.installed || model.updateEntry?.difference.hasChanges(in: model.updateScope) == true {
                         Button { model.download() } label: {
-                            let title = updating ? (model.installed ? "업데이트 확인 완료" : "팩 업데이트 확인") : model.result.map { $0.failed > 0 ? "실패한 \($0.failed)개 다시 시도" : "설치 완료" }
+                            let title = model.restoringOriginal ? (model.installed ? "원본 복원 완료" : "원본 복원") : updating ? (model.installed ? "업데이트 완료" : "업데이트") : model.result.map { $0.failed > 0 ? "실패한 \($0.failed)개 다시 시도" : "설치 완료" }
                                 ?? (model.progress == nil ? "스티커 설치" : "다시 시도")
                             Text(title).frame(maxWidth: .infinity)
                         }
                             .appGlassButton(prominent: true).controlSize(.large)
                             .disabled(model.busy || model.installed || ImportActivity.shared.count > 0 || (!updating && pack.installableStickers.isEmpty))
                             .accessibilityIdentifier("installRemotePack")
+                        }
                         if !model.failures.isEmpty {
                             DisclosureGroup("실패 항목 보기 (\(model.failures.count))") {
                                 ForEach(model.failures) { failure in
@@ -240,10 +242,14 @@ struct ImportView: View {
                                 }
                             }.foregroundStyle(.red).accessibilityIdentifier("importFailures")
                         }
+                        if updating, !model.restoringOriginal, let entry = model.updateEntry {
+                            PackUpdateChangesView(entry: entry, client: model.client)
+                        } else if !updating || model.restoringOriginal {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: stickerWidth, maximum: max(stickerWidth, 88)), spacing: 8)], spacing: 8) {
                             ForEach(pack.stickers) { sticker in
                                 RemoteStickerPreview(pack: pack.name, sticker: sticker, client: model.client)
                             }
+                        }
                         }
                         DisclosureGroup("복사 방식과 지원 형식") {
                             Text("일부 항목이 실패해도 성공한 스티커는 바로 설치해요. 실패한 항목만 나중에 다시 가져올 수 있어요.")
@@ -261,7 +267,7 @@ struct ImportView: View {
             }
             .modifier(KeyboardPermissionReminder(working: model.installing))
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle(model.restoringOriginal ? "스티커 원본 복원" : (updating ? "스티커 팩 업데이트 확인" : "Telegram 팩 추가"))
+            .navigationTitle(model.restoringOriginal ? "스티커 원본 복원" : (updating ? "스티커 팩 업데이트" : "Telegram 팩 추가"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 AppModalCloseToolbar(accessibilityID: "closeImport") { dismiss() }
@@ -279,7 +285,7 @@ struct ImportView: View {
                     ImportActivity.shared.optimizationSuggestion = nil
                 }
                 Button("나중에", role: .cancel) { ImportActivity.shared.optimizationSuggestion = nil }
-            } message: { Text("설치한 팩의 화질을 비교하고 저장 공간을 줄일 수 있어요.") }
+            } message: { Text("이번에 받은 스티커만 화질을 비교하고 최적화해요. 기존 스티커는 유지해요.") }
             .sheet(item: $postInstallOptimization) { OptimizationView(request: $0) }
             .onAppear { ImportActivity.shared.visibleImportIDs.insert(model.id) }
             .onDisappear { ImportActivity.shared.visibleImportIDs.remove(model.id) }

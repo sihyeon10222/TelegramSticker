@@ -10,6 +10,14 @@ nonisolated struct LocalStickerInput: Sendable {
     var sourceFormat: String = "png"
     var animationURL: URL? = nil
     var conversionQuality: String? = nil
+    var reusableFiles: ReusableStickerFiles? = nil
+}
+
+nonisolated struct ReusableStickerFiles: Sendable {
+    let reader: LibraryReader
+    let packID: String
+    let revision: String
+    let record: StickerRecord
 }
 
 /// The app's only writer. Operations contain no suspension points, so publication is serialized.
@@ -33,7 +41,7 @@ actor LibraryWriter {
 
     func pack(id: String) throws -> PackManifestV1? {
         guard try contains(id: id) else { return nil }
-        guard let pack = try reader.snapshot().packs.first(where: { $0.id == id }) else { throw LibraryError.invalidIndex }
+        guard let pack = try reader.snapshot(resolvingFiles: false).packs.first(where: { $0.id == id }) else { throw LibraryError.invalidIndex }
         return pack
     }
 
@@ -62,7 +70,8 @@ actor LibraryWriter {
     func inputs(for pack: PackManifestV1) throws -> [LocalStickerInput] {
         try pack.stickers.map { record in
             LocalStickerInput(id: record.id, name: record.name, url: try reader.file(record.pngPath),
-                sourceFormat: record.sourceFormat ?? "png", animationURL: try record.animationPath.map { try reader.file($0) }, conversionQuality: record.conversionQuality)
+                sourceFormat: record.sourceFormat ?? "png", animationURL: try record.animationPath.map { try reader.file($0) }, conversionQuality: record.conversionQuality,
+                reusableFiles: ReusableStickerFiles(reader: reader, packID: pack.id, revision: pack.revision, record: record))
         }
     }
 
@@ -97,6 +106,10 @@ actor LibraryWriter {
         var totalBytes = 0
         for sticker in stickers {
             try Task.checkCancellation()
+            if let reused = try copyReusableFiles(sticker, to: staging, packID: id, revision: revision) {
+                records.append(reused)
+                continue
+            }
             let data = try Data(contentsOf: sticker.url, options: .mappedIfSafe)
             guard PNGValidation.isValid(data) else { throw LibraryError.invalidImage }
             totalBytes += data.count
@@ -143,6 +156,40 @@ actor LibraryWriter {
             try? fm.removeItem(at: destination)
             throw error
         }
+    }
+
+    /// Copy validated paths into the new revision. Reused assets remain byte-for-byte identical.
+    private func copyReusableFiles(_ input: LocalStickerInput, to staging: URL, packID: String, revision: String) throws -> StickerRecord? {
+        guard let reuse = input.reusableFiles else { return nil }
+        let old = reuse.record
+        let prefix = "packs/\(reuse.packID)/\(reuse.revision)/"
+        guard LibraryReader.safeID(reuse.packID), LibraryReader.safeID(reuse.revision), old.id == input.id,
+              old.pngPath.hasPrefix(prefix), old.thumbnailPath.hasPrefix(prefix),
+              old.animationPath.map({ $0.hasPrefix(prefix) }) != false,
+              old.playbackPath.map({ $0.hasPrefix(prefix) }) != false else { throw LibraryError.unsafePath }
+        guard input.url == (try reuse.reader.file(old.pngPath)),
+              input.animationURL == (try old.animationPath.map { try reuse.reader.file($0) }),
+              input.sourceFormat == (old.sourceFormat ?? "png"), input.conversionQuality == old.conversionQuality else { return nil }
+        // Legacy packs may lack playback/thumbnail files; regenerate only that item.
+        let paths = [old.pngPath, old.thumbnailPath, old.animationPath, old.playbackPath].compactMap { $0 }
+        for path in paths {
+            let file = try reuse.reader.file(path)
+            guard (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return nil }
+        }
+        if old.animationPath != nil && old.playbackPath == nil { return nil }
+        let newPrefix = "packs/\(packID)/\(revision)/"
+        func copy(_ path: String, suffix: String) throws -> String {
+            let name = input.id + suffix
+            try FileManager.default.copyItem(at: reuse.reader.file(path), to: staging.appendingPathComponent(name))
+            return newPrefix + name
+        }
+        return StickerRecord(id: input.id, name: input.name, format: "png",
+            pngPath: try copy(old.pngPath, suffix: "-original.png"),
+            thumbnailPath: try copy(old.thumbnailPath, suffix: "-thumb.png"), sha256: old.sha256,
+            sourceFormat: old.sourceFormat,
+            animationPath: try old.animationPath.map { try copy($0, suffix: "-animation.gif") },
+            playbackPath: try old.playbackPath.map { try copy($0, suffix: "-playback.gif") },
+            conversionQuality: old.conversionQuality)
     }
 
     func preparePlaybackFiles() throws {

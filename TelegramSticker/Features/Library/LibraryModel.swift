@@ -24,6 +24,7 @@ final class LibraryModel {
             // Published manifests are ready to display; maintenance must not gate the first frame.
             let snapshot = try reader.snapshot(resolvingFiles: false)
             packs = snapshot.packs
+            PackUpdateService.shared.reconcile(packs: packs)
             let available = Set(snapshot.packs.map(\.id))
             damagedPacks = try reader.index().packs.filter { !available.contains($0.id) }
             message = snapshot.warnings.first
@@ -38,6 +39,7 @@ final class LibraryModel {
             let (snapshot, references) = try await Task.detached { (try reader.snapshot(resolvingFiles: false), try reader.index().packs) }.value
             guard !Task.isCancelled, generation == refreshGeneration else { return }
             packs = snapshot.packs
+            PackUpdateService.shared.reconcile(packs: packs)
             let revisions = Set(packs.map { $0.id + "." + $0.revision })
             stickerCache = stickerCache.filter { revisions.contains($0.key) }
             coverCache = coverCache.filter { revisions.contains($0.key) }
@@ -54,6 +56,7 @@ final class LibraryModel {
             do { try await writer.recover() } catch { message = error.localizedDescription }
         }
         await refresh()
+        await PackUpdateService.shared.restore(packs: packs)
         if let writer {
             do { try await writer.preparePlaybackFiles(); await refresh() } catch { message = error.localizedDescription }
         }

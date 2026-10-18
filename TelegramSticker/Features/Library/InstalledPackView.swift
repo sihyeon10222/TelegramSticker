@@ -11,6 +11,7 @@ struct InstalledPackView: View {
     let pack: PackManifestV1
     let stickers: [Sticker]
     let update: () -> Void
+    let refresh: () async -> Void
     let retry: () -> Void
     let optimize: (Set<String>) -> Void
     let delete: () async -> Void
@@ -28,6 +29,7 @@ struct InstalledPackView: View {
     @State private var stickerFrames: [String: CGRect] = [:]
     @State private var selectionGestureGeneration = 0
     @State private var columnCount = 4
+    @AppStorage("library.stickerGrid.columns.v1") private var savedColumnCount = 0
     @State private var pinchStartColumns: Int?
     @GestureState private var pinching = false
     @State private var suppressTapUntil = Date.distantPast
@@ -47,6 +49,7 @@ struct InstalledPackView: View {
         guard !pinching else { return }
         withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.32, dampingFraction: 0.86)) {
             columnCount = min(10, max(2, columnCount + delta))
+            savedColumnCount = columnCount
         }
     }
     #endif
@@ -62,6 +65,7 @@ struct InstalledPackView: View {
                 guard columns != columnCount else { return }
                 withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.32, dampingFraction: 0.86)) {
                     columnCount = columns
+                    savedColumnCount = columns
                 }
             }
             .onEnded { _ in
@@ -176,6 +180,7 @@ struct InstalledPackView: View {
         }
         .onChange(of: geometry.size) { _, _ in selectionGestureGeneration += 1 }
         .simultaneousGesture(gridZoom)
+        .refreshable { await refresh() }
         }
     }
 
@@ -195,7 +200,14 @@ struct InstalledPackView: View {
             selecting = true; selectedStickers = Set(stickers.map(\.id))
         }))
         #endif
-        .onChange(of: columnCount) { _, _ in selectionGestureGeneration += 1 }
+        .onChange(of: columnCount) { _, value in
+            selectionGestureGeneration += 1
+            if pinchStartColumns != nil || savedColumnCount != 0 { savedColumnCount = min(10, max(2, value)) }
+        }
+        .onChange(of: savedColumnCount) { _, value in
+            if (2...10).contains(value), columnCount != value { columnCount = value }
+            else if value == 0 { columnCount = horizontalSizeClass == .regular ? 5 : 4 }
+        }
         .onChange(of: horizontalSizeClass) { _, _ in selectionGestureGeneration += 1 }
         .onChange(of: pinching) { _, active in
             if !active {
@@ -204,7 +216,7 @@ struct InstalledPackView: View {
             }
         }
         .onChange(of: horizontalSizeClass, initial: true) { _, sizeClass in
-            columnCount = sizeClass == .regular ? 5 : 4
+            columnCount = (2...10).contains(savedColumnCount) ? savedColumnCount : (sizeClass == .regular ? 5 : 4)
             pinchStartColumns = nil
         }
         .onChange(of: activeTab) { _, tab in

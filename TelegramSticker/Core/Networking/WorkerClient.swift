@@ -123,9 +123,11 @@ actor WorkerClient {
         let maximumRetries = path.contains("/assets/") ? 0 : 5
         for attempt in 0...maximumRetries {
             try await BackgroundWork.shared.waitForExecution()
+            let queuedAt = ContinuousClock.now
             try await requests.acquire()
             do {
                 try await DownloadRequestBudget.shared.wait(asset: path.contains("/assets/"))
+                await DownloadDiagnostics.shared.record("REQUEST_READY path=\(path) kind=\(path.contains("/assets/") ? "asset" : "metadata") queueAndBudgetWait=\(queuedAt.duration(to: .now))")
                 let file = try await perform(url)
                 await requests.release()
                 return file

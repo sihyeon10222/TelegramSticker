@@ -17,11 +17,16 @@ extension EnvironmentValues {
 }
 
 private struct LibraryHomeRequestKey: EnvironmentKey { static let defaultValue = 0 }
+private struct LibraryUpdatesRequestKey: EnvironmentKey { static let defaultValue = 0 }
 
 extension EnvironmentValues {
     var libraryHomeRequest: Int {
         get { self[LibraryHomeRequestKey.self] }
         set { self[LibraryHomeRequestKey.self] = newValue }
+    }
+    var libraryUpdatesRequest: Int {
+        get { self[LibraryUpdatesRequestKey.self] }
+        set { self[LibraryUpdatesRequestKey.self] = newValue }
     }
 }
 
@@ -30,6 +35,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = AppTab.library
     @State private var libraryHomeRequest = 0
+    @State private var libraryUpdatesRequest = 0
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var onboarding = false
     @Bindable private var imports = ImportActivity.shared
@@ -46,6 +52,7 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .macOpenManagement)) { _ in selectedTab = .settings }
         #endif
         .environment(\.libraryHomeRequest, libraryHomeRequest)
+        .environment(\.libraryUpdatesRequest, libraryUpdatesRequest)
         .sheet(item: $imports.presentedImport) { session in
             ImportView(model: session)
         }
@@ -59,7 +66,7 @@ struct ContentView: View {
                 imports.optimizationSuggestion = nil
             }
             Button("나중에", role: .cancel) { imports.optimizationSuggestion = nil }
-        } message: { Text("설치한 팩의 화질을 비교하고 저장 공간을 줄일 수 있어요.") }
+        } message: { Text("이번에 받은 스티커만 화질을 비교하고 최적화해요. 기존 스티커는 유지해요.") }
         .sheet(item: $linkInbox.received) { ReceivedPackLinksView(received: $0) }
         .fileImporter(isPresented: $linkInbox.showFileImporter, allowedContentTypes: [UTType(filenameExtension: "stickerlinks") ?? .plainText, .plainText]) { result in
             switch result {
@@ -110,6 +117,21 @@ struct ContentView: View {
             optimizations.presented = session
         }
         .task { onboarding = !hasCompletedOnboarding }
+        .task(id: notifications.pendingPackUpdates) {
+            guard notifications.pendingPackUpdates else { return }
+            while !Task.isCancelled {
+                let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+                    .filter { $0.activationState == .foregroundActive }.flatMap(\.windows).first(where: \.isKeyWindow)
+                if let window, UIApplication.shared.applicationState == .active, !onboarding,
+                   window.rootViewController?.presentedViewController == nil { break }
+                do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            }
+            guard !Task.isCancelled else { return }
+            selectedTab = .library
+            libraryHomeRequest += 1
+            libraryUpdatesRequest += 1
+            notifications.pendingPackUpdates = false
+        }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
             await LibrarySyncService.shared.synchronize()
