@@ -66,6 +66,24 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -allowProvisioningUpdates build
 ```
 
+### 다른 Mac에 복사할 앱 만들기
+
+기본 앱은 App Group의 기존 스티커 저장소를 사용하므로 서명·프로비저닝을 유지해야 합니다. `codesign --sign -`로 임시 재서명하거나 프로비저닝을 제거하지 마세요. 서명 팀이 사라지면 기존 `index.json` 접근이 거부될 수 있습니다. 앞서 제공한 ad-hoc 배포 안내는 철회합니다.
+
+Xcode에서 수정할 때마다 다음 순서로 내보냅니다.
+
+1. `TelegramSticker.xcodeproj`를 열고 `TelegramSticker` 스킴과 **Any Mac (Mac Catalyst)** 목적지를 선택합니다. Xcode 버전에 따라 My Mac (Mac Catalyst)로 표시될 수 있습니다.
+2. 앱 및 `StickerBridgeDesktop` 타깃의 Signing & Capabilities에서 기존 Team과 Automatically manage signing을 유지합니다. 임의의 다른 Mac에 배포하려면 Apple Developer Program과 **Developer ID Application** 인증서가 필요합니다.
+3. **Product → Archive**를 선택합니다. Archive는 Release 구성을 사용합니다. Intel과 Apple Silicon을 함께 포함하려면 앱·플러그인의 Release 설정에서 Architectures가 Standard Architectures이고 Build Active Architecture Only가 No인지 확인합니다.
+4. **Window → Organizer → Archives**에서 방금 만든 아카이브를 선택하고 **Distribute App → Developer ID**를 선택합니다. 버전에 따라 Custom 안에서 Developer ID를 선택합니다.
+5. **Upload**와 자동 서명을 선택해 Apple 공증을 요청합니다. 공증이 완료되면 **Export Notarized App**으로 내보냅니다. 생성된 `.app`을 ZIP으로 압축해 전달하고, 다른 Mac에서는 압축을 풀어 응용 프로그램 폴더에 옮깁니다.
+
+공증을 생략하고 Export만 하면 Developer ID 서명은 가능하지만 기본 보안 설정에서 경고가 발생할 수 있습니다. macOS 27 이상이 필요합니다. 기본 빌드에서는 iCloud를 사용하지 않습니다.
+
+터미널에서는 `bash Scripts/BuildMacPortable.sh`로 Developer ID 내보내기를 요청합니다. 인증서가 없으면 안전하게 중단합니다. 이 스크립트의 Developer ID 내보내기에는 자동 공증 제출이 포함되지 않으므로 공증은 위 Xcode Organizer 절차를 사용하세요. **현재 개발 Mac용** 앱은 `bash Scripts/BuildMacPortable.sh --development`로 만들며, 개발용 서명·프로비저닝을 유지합니다. 개발용 앱은 모든 Mac에 자유롭게 배포할 수 있는 결과물이 아닙니다. 실행마다 새 날짜 폴더에 `.app`과 ZIP을 만듭니다.
+
+Apple 안내: [공증 업로드·내보내기](https://help.apple.com/xcode/mac/current/en.lproj/dev88332a81e.html), [App Group 데이터 보호](https://developer.apple.com/documentation/xcode/protecting-local-app-data-using-containers).
+
 ## iCloud 동기화와 개발자 서명
 
 동기화 코드는 앱에 포함되며 **팩 목록·순서·팩 삭제**를 같은 Apple 계정의 기기 사이에서 맞춥니다. PNG·GIF는 기존 서비스에서 기기별로 다운로드합니다. 개별 스티커 삭제, 최적화 화질, 캐시, 키보드 최근 사용·설정은 동기화하지 않습니다. 최초 연결은 클라우드 목록과 기존 로컬 팩을 합치고, 클라우드 삭제 기록은 보존합니다. 앱 초기화는 해당 기기의 동기화를 끄고 로컬 데이터만 지웁니다.

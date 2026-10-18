@@ -4,6 +4,8 @@
 
 # 파일 구조와 작업 가이드
 
+2026-10-18 Mac 파일 배포 서명 보정: 앞선 ad-hoc 서명·프로비저닝 제거 안내를 철회한다. 해당 결과물은 기존 App Group index.json 접근 권한 오류를 유발했다. Scripts/BuildMacPortable.sh는 기본 Developer ID archive/export 및 --development의 기존 Xcode 서명·프로비저닝 유지 빌드만 지원한다. Developer ID 인증서가 없으면 기본 배포 작업을 중단하며 개발 빌드를 임의 Mac용 배포판으로 안내하지 않는다. arm64/x86_64 및 내장 플러그인 서명을 유지하고 날짜별 새 출력 폴더를 쓴다. README에 Xcode Archive → Developer ID → 공증 → 내보내기 절차를 기록한다. 앱 코드·타깃·리소스·기존 저장 경로 변경은 없으며 빌드 도구는 Xcode 타깃에 포함하지 않는다.
+
 2026-10-17 기본 높이 전환 회귀 복구: 사용자 사진에서 팩 줄만 남고 그리드가 접히는 회귀를 확인했다. UICollectionView에는 자체 콘텐츠 높이를 제공하는 intrinsic height가 없어 루트 높이 요청을 없애면 탭 줄만으로 수직 fitting이 완료될 수 있다. `StickerKeyboard/KeyboardViewController.swift`의 기본 UIInputView(.keyboard)·allowsSelfSizing과 기존 240/200/380pt 높이 제약(999)을 복구한다. fitting override·viewDidAppear 재요청은 복구하지 않는다. 중복 라이브러리/썸네일 준비 제거와 권한 기록 guard 이동은 유지한다. 기본 시스템 높이만으로 충분하다는 앞선 설명을 철회한다. 기존 파일 내부 수정으로 파일·타깃·리소스·저장소 변경은 없다. 이번 변경은 새로 발생한 접힘 회귀를 되돌리는 범위이며 원래의 간헐적 빈 화면·여백·전환 깜빡임을 해결했다고 판단하지 않는다.
 
 2026-10-17 키보드 깜빡임 재수정: 사용자 확인상 앞선 fitting override·높이 재게시 수정은 세 현상 모두에 효과가 없었다. 해당 접근을 철회하고 `StickerKeyboard/KeyboardViewController.swift`는 시스템 UIInputViewController의 기본 루트·기본 높이를 그대로 사용한다. loadView 교체, allowsSelfSizing, 240/200/380pt 루트 높이 제약, fitting override 및 viewDidAppear 재요청을 제거한다. 그리드는 실제 배정 영역으로 기존 최소 셀 크기와 최대 네 행을 계산하며 접근성 셀·팩 줄은 유지한다. 첫 라이브러리 복원은 viewWillAppear 한 곳에서 실행하고 같은 진입의 중복 썸네일 준비를 제거한다. `Views/KeyboardStatus.swift`는 표시 시작·접근 권한 변경 시에만 공유 접근 기록을 읽고 게시한다. 레이아웃마다 동기 defaults 접근을 반복하지 않는다. 키보드 기존 파일의 수명 주기·권한 관찰 책임 변경이며 파일·타깃·리소스·저장소 경계 변경은 없다. 이전 높이 협상 설명보다 이 항목을 우선한다. 테스트 없이 빌드·덮어쓰기 설치 대상으로 제공하며 사용자 앱에서 현상이 사라졌다고 판정한 결과는 아니다.
@@ -512,3 +514,6 @@ iOS 스와이프 깜빡임 보정 빌드·설치: iOS Debug 빌드 성공. 연�
 2026-10-18 이전 화면 상태 잔류 방지: LibraryView는 설치 팩 상세의 SwiftUI identity를 pack.id로 구분하여 팩 전환 시 공유 시트·삭제 확인·확대 상태 등 이전 팩의 로컬 상태가 새 팩에 이어지지 않게 한다. InstalledPackView의 부분적인 pack.id 변경 초기화는 제거한다. LibraryModel.refresh는 요청 세대와 취소 여부를 확인한 뒤 결과·오류를 게시하여 늦게 끝난 과거 목록이 최신 결과를 덮지 않게 한다. KeyboardState의 기존 snapshot 재사용 및 KeyboardLibraryLoading의 비동기 갱신 생략 조건은 libraryRevision과 cacheGeneration을 함께 비교한다. 갱신된 키보드 목록을 적용한 뒤 현재 탭의 저장 스크롤 위치를 다시 보정한다. 기존 파일 내부 변경이며 파일·타깃·리소스·설치 데이터 경로는 유지한다. 테스트는 실행하지 않는다.
 
 이전 화면 상태 잔류 방지 빌드·설치: 앱·키보드 확장의 iOS Debug 실기기 빌드 성공. 연결된 iPhone 15 Pro에 기존 데이터를 유지해 덮어쓰기 설치·실행 완료. 테스트·수동 UI 검증은 실행하지 않았으며 사용자가 관찰한 간헐적 구형 UI 노출의 실제 재현·해소 여부는 미검증이다.
+
+
+2026-10-18 배포 서명 보정 완료: Catalyst Release arm64/x86_64 정상 서명 빌드 성공. 기존 팀 RKQCX265PQ·App Group entitlement·embedded.provisionprofile 및 deep/strict 서명 확인. 이전 .build/MacDistribution의 앱·ZIP과 ~/Applications/StickerBridge.app을 정상 개발 서명 빌드로 교체하고 설치 앱 실행 완료. 기존 라이브러리 데이터·경로는 수정하지 않았다. 앱 소스 변경이 없어 iOS 재빌드·재설치는 하지 않았다. 테스트·수동 UI 확인은 실행하지 않았으며 임의 Mac 배포용 Developer ID 내보내기는 인증서 부재로 미수행이다.
