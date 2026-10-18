@@ -544,3 +544,7 @@ Core/Library의 PackUpdateScope(all/additions/deletions/changes)는 앱 내부 �
 갤러리와 업데이트 두 기능에서 재사용하는 GalleryStickerPreview.swift를 Features/Gallery/에서 UI/로 이동했다. 이동은 원본 소스 변경 없이 수행했으며 앱 파일 시스템 동기화 그룹의 동일 타깃을 유지한다. GalleryPreviewStore의 설치 파일 재사용은 원본 형식이 일치할 때만 허용한다. 리소스·번들 조회·Shared·키보드·설치 라이브러리 저장 경로 변경은 없다. 사용자 지시에 따라 앞으로 Xcode 작업은 연결된 모든 지원 기기에 빌드·설치하며, 이번 작업은 iPhone·iPad·Mac 모두 설치 대상으로 한다. 테스트 및 수동 UI 검증은 실행하지 않는다.
 
 GIF 미리보기·요약 정리 완료: iPhone 15 Pro와 iPad Pro 12.9 M2 각각의 실기기 목적지 Debug 빌드 및 Catalyst arm64 Release 빌드 성공. 두 실기기에 데이터 유지 덮어쓰기 설치·실행 완료. Mac은 기존 ~/Applications/StickerBridge.app을 정상 Xcode 서명 빌드로 교체하고 실행했으며 deep/strict 서명 확인을 완료했다. 이전 Mac 앱 번들은 .build/MacInstallBackup.*에 보관했고 App Group·사용자 데이터는 수정하지 않았다. 이동한 GalleryStickerPreview.swift가 앱 타깃에서 컴파일됨을 확인했다. 테스트 및 수동 UI 검증은 실행하지 않았다.
+
+2026-10-18 최적화 후 SQLite 임시 파일 정리 오류 보정: Core/Library/AppDisposableCache.swift는 Caches와 tmp 전체를 삭제하던 처리를 앱 소유 GalleryPreviews·PackUpdateChecks 및 UUID가 유효한 StickerOptimization-<UUID> 비교 폴더로 제한한다. 시스템·라이브러리의 tmpsqlitetruncated* 등 알 수 없는 임시 파일은 건드리지 않으며 URLCache는 공식 removeAllCachedResponses API로 정리한다. 정리 중 이미 사라진 파일 오류만 정상 처리하고 실제 권한·경로 오류는 다른 앱 캐시 정리를 마친 뒤 계속 보고한다. 삭제 가능 용량 표시도 같은 소유 경계와 URLCache 디스크 용량을 사용한다. 기존 최적화 결과·설치 revision·App Group 데이터 및 활성 작업 lease는 유지한다. 파일 이동·타깃·리소스·사용자 저장 형식 변경은 없으며 테스트는 실행하지 않는다.
+
+SQLite 임시 파일 정리 보정 빌드·설치: iPhone 15 Pro 및 iPad Pro 12.9 M2 실기기 목적지 Debug 빌드, Catalyst arm64 Release 빌드 성공. 두 실기기 및 ~/Applications/StickerBridge.app에 기존 데이터 유지 설치·실행 완료. Mac deep/strict 서명을 확인했다. 자동 테스트·수동 UI 검증 및 최적화 재실행은 수행하지 않았다.
