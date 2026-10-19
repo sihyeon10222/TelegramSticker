@@ -32,6 +32,7 @@ struct TelegramStickerApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .toggleStyle(AppQuietToggleStyle())
                 #if targetEnvironment(macCatalyst)
                 // Scene restrictions include the title bar; content must fit the remaining space.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

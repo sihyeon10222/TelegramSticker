@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UIKit
 
 struct PackLinkShareMenu: View {
@@ -40,15 +41,17 @@ struct PackLinksShareView: View {
 struct PackLinkShareButton: View {
     let text: String
     var disabled = false
+    @StateObject private var presenter = PackLinkSharePresenter()
 
     var body: some View {
         #if targetEnvironment(macCatalyst)
         CatalystPackShareButton(text: text, disabled: disabled || text.isEmpty)
             .frame(width: 36, height: 36)
         #else
-        ShareLink(item: text) {
+        Button { presenter.present(text: text) } label: {
             Label("Sticker Pack 링크 공유", systemImage: "square.and.arrow.up")
         }
+        .background(PackLinkShareAnchor(presenter: presenter))
         .labelStyle(.iconOnly)
         .disabled(disabled || text.isEmpty)
         .accessibilityIdentifier("sharePackLink")
@@ -56,6 +59,44 @@ struct PackLinkShareButton: View {
     }
 
 
+}
+
+@MainActor
+private final class PackLinkSharePresenter: ObservableObject {
+    weak var sourceView: UIView?
+
+    func present(text: String) {
+        guard let sourceView, let window = sourceView.window else { return }
+        var responder: UIResponder? = sourceView
+        while responder != nil && !(responder is UIViewController) {
+            responder = responder?.next
+        }
+        guard let controller = responder as? UIViewController,
+              controller.view.window === window,
+              controller.presentedViewController == nil else { return }
+        let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let popover = activity.popoverPresentationController {
+            popover.sourceView = sourceView
+            popover.sourceRect = sourceView.bounds
+            popover.permittedArrowDirections = .any
+        }
+        controller.present(activity, animated: true)
+    }
+}
+
+private struct PackLinkShareAnchor: UIViewRepresentable {
+    let presenter: PackLinkSharePresenter
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        presenter.sourceView = view
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        presenter.sourceView = view
+    }
 }
 
 #if targetEnvironment(macCatalyst)
@@ -98,8 +139,14 @@ private struct CatalystPackShareButton: UIViewRepresentable {
 
 struct PackTextShareSheet: UIViewControllerRepresentable {
     let text: String
+    var fileURL: URL? = nil
+    var onCompleted: @MainActor () -> Void = {}
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        let activity = UIActivityViewController(activityItems: fileURL.map { [$0 as Any] } ?? [text], applicationActivities: nil)
+        let onCompleted = onCompleted
+        activity.completionWithItemsHandler = { _, completed, _, _ in
+            if completed { Task { @MainActor in onCompleted() } }
+        }
         if let popover = activity.popoverPresentationController {
             popover.sourceView = activity.view
             popover.sourceRect = CGRect(x: activity.view.bounds.midX, y: activity.view.bounds.midY, width: 1, height: 1)

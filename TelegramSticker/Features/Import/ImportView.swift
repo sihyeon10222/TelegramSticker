@@ -159,7 +159,7 @@ struct ImportView: View {
                                         .accessibilityLabel("길게 눌러 링크 순서 변경")
                                     Button { deletingLink = entry.id } label: {
                                         Image(systemName: "minus.circle").frame(width: 44, height: 44)
-                                    }.accessibilityLabel("링크 삭제")
+                                    }.foregroundStyle(.red).accessibilityLabel("링크 삭제")
                                     .confirmationDialog("이 링크를 삭제할까요?", isPresented: Binding(
                                         get: { deletingLink == entry.id },
                                         set: { if !$0 { deletingLink = nil } }
@@ -169,6 +169,7 @@ struct ImportView: View {
                                             model.setInputLinks(rows.isEmpty ? [AdditionalPackLink()] : rows)
                                             deletingLink = nil
                                         }
+                                        .foregroundStyle(.red)
                                         Button("취소", role: .cancel) { deletingLink = nil }
                                     }
                                 }
@@ -285,7 +286,7 @@ struct ImportView: View {
                     ImportActivity.shared.optimizationSuggestion = nil
                 }
                 Button("나중에", role: .cancel) { ImportActivity.shared.optimizationSuggestion = nil }
-            } message: { Text("이번에 받은 스티커만 화질을 비교하고 최적화해요. 기존 스티커는 유지해요.") }
+            } message: { Text("이번에 받은 스티커만 용량을 최적화해 바로 적용해요. 기존 스티커는 유지해요.") }
             .sheet(item: $postInstallOptimization) { OptimizationView(request: $0) }
             .onAppear { ImportActivity.shared.visibleImportIDs.insert(model.id) }
             .onDisappear { ImportActivity.shared.visibleImportIDs.remove(model.id) }
@@ -304,5 +305,6 @@ struct ImportView: View {
             }
         }
         .appModalBackground()
+        .workNotificationScreen("imports")
     }
 }

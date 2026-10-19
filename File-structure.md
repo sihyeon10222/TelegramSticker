@@ -548,3 +548,55 @@ GIF 미리보기·요약 정리 완료: iPhone 15 Pro와 iPad Pro 12.9 M2 각각
 2026-10-18 최적화 후 SQLite 임시 파일 정리 오류 보정: Core/Library/AppDisposableCache.swift는 Caches와 tmp 전체를 삭제하던 처리를 앱 소유 GalleryPreviews·PackUpdateChecks 및 UUID가 유효한 StickerOptimization-<UUID> 비교 폴더로 제한한다. 시스템·라이브러리의 tmpsqlitetruncated* 등 알 수 없는 임시 파일은 건드리지 않으며 URLCache는 공식 removeAllCachedResponses API로 정리한다. 정리 중 이미 사라진 파일 오류만 정상 처리하고 실제 권한·경로 오류는 다른 앱 캐시 정리를 마친 뒤 계속 보고한다. 삭제 가능 용량 표시도 같은 소유 경계와 URLCache 디스크 용량을 사용한다. 기존 최적화 결과·설치 revision·App Group 데이터 및 활성 작업 lease는 유지한다. 파일 이동·타깃·리소스·사용자 저장 형식 변경은 없으며 테스트는 실행하지 않는다.
 
 SQLite 임시 파일 정리 보정 빌드·설치: iPhone 15 Pro 및 iPad Pro 12.9 M2 실기기 목적지 Debug 빌드, Catalyst arm64 Release 빌드 성공. 두 실기기 및 ~/Applications/StickerBridge.app에 기존 데이터 유지 설치·실행 완료. Mac deep/strict 서명을 확인했다. 자동 테스트·수동 UI 검증 및 최적화 재실행은 수행하지 않았다.
+
+2026-10-18 앱 상세 복사 피드백: Features/Library/InstalledPackView.swift는 복사 성공 시 상단 확대·축소 안내를 복사됨 문구로 바꾸지 않는다. 복사한 셀의 세대 값으로 같은 스티커 연속 복사도 다시 시작되는 유한 keyframe 모션(살짝 축소·확대 후 원래 크기, 약 0.56초 체크 표시)을 실행한다. 영구 copiedID 및 Mac focusedStickerID에 의한 파란 셀 배경은 제거하고, Mac 단축키 복사를 위한 포커스 ID와 선택 모드는 유지한다. 동작 줄이기에서는 크기 모션을 생략하고 짧은 체크 페이드만 표시한다. 오류 안내와 VoiceOver 복사 결과 알림은 유지한다. 같은 파일 내부 private 표시 modifier이며 GIF 뷰 identity·파일·타깃·리소스·저장 경로 변경은 없다. 테스트는 실행하지 않는다.
+
+앱 상세 복사 피드백 빌드·설치: iPhone 15 Pro·iPad Pro 12.9 M2 각각의 실기기 Debug 및 Catalyst arm64 Release 빌드 성공. 두 실기기와 Mac의 기존 앱에 데이터 유지 설치·실행 완료. Mac deep/strict 서명을 확인했다. 테스트 및 수동 UI 검증은 실행하지 않았다.
+
+2026-10-18 복사 피드백 아이콘 변경: InstalledPackView의 StickerCopyFeedback은 체크 대신 시스템 SF Symbol doc.on.doc 복사 아이콘을 표시한다. 기존 짧은 크기 모션·페이드와 영구 파란 배경 제거는 유지한다. 파일·타깃·리소스·저장 경로 변경은 없으며 테스트는 실행하지 않는다.
+
+2026-10-18 상세 스티커 동작 보완: InstalledPackView의 짧은 복사 아이콘 배경에 시스템 Liquid Glass를 적용한다. 셀 컨텍스트 메뉴에 단일 스티커 용량 최적화·삭제를 추가하고 삭제 확인 대상은 다중 선택과 별도로 보관한다. 기존 LibraryWriter의 revision 검증·원자적 게시를 사용하며 삭제 성공 직후 PackUpdateService의 이전 조회 결과와 앱 전용 캐시를 무효화한다. 삭제 전 진행 중이던 확인 결과도 세대 검증으로 게시하지 않으며 이후 사용자가 새로고침/업데이트 확인을 하면 다시 차이를 계산한다. 파일·타깃·리소스·공유 저장 형식 변경은 없다. 테스트 및 수동 UI 검증은 실행하지 않는다.
+
+2026-10-18 용량 최적화 즉시 적용: OptimizationView 진입 시 OptimizationSession이 기존 용량 우선(256px·15fps) 변환을 즉시 실행하고 LibraryWriter의 revision 원자적 게시로 반영한다. 화질 우선 프로필·선택 UI·비교 임시 라이브러리 생성·비교 적용 API를 제거했다. ImportJobCache는 직접 최적화와 후속 캐시 정리까지 lease를 유지한다. 완료 알림은 결과 세션으로 연결한다. 원본 복원·선택 팩/스티커 범위·더 작은 파일만 반영하는 조건은 유지한다. 파일·타깃·리소스·사용자 데이터 경로 변경은 없으며 테스트는 실행하지 않는다.
+
+2026-10-18 삭제 동작 색상: 앱의 삭제·비우기·초기화 버튼은 destructive 역할과 명시적인 빨간 foreground/tint를 함께 적용한다. LibraryView의 선택 팩 삭제는 빨간 채움/흰 글자의 prominent 스타일 대신 빨간 글자 글래스 버튼을 사용한다. 업데이트 변경 내역의 삭제 제목과 링크 삭제·캐시 삭제도 빨간색으로 통일한다. iPhone/iPad 공통 SwiftUI와 Catalyst 경로를 검토했으며 파일·타깃·리소스·저장 경로 변경은 없다. 테스트는 실행하지 않는다.
+
+삭제 색상 범위 보정: 빨간 tint는 확인창의 일반 버튼까지 상속될 수 있으므로 제거한다. 삭제 동작 자체의 destructive 역할과 foreground만 사용하고 일반 확인·취소·안내는 기본색을 유지한다. 초기화 단계와 변경 내역 제목에 추가한 명시적 색상도 철회한다.
+
+즉시 최적화 빌드·설치: iPhone 15 Pro·iPad Pro 12.9 M2 각각의 실기기 Debug 및 Catalyst arm64 Release 빌드 성공. 두 실기기와 Mac에 기존 데이터 유지 덮어쓰기 설치·실행 완료. Mac deep/strict 서명 확인 완료. 삭제한 비교 API를 참조하던 기존 테스트 소스는 직접 적용 API에 맞게 정리했으나 테스트·수동 UI 검증·실제 최적화 실행은 수행하지 않았다.
+
+2026-10-18 Mac 삭제 메뉴·편집 버튼 보정: UI/AppActionMenu.swift는 Catalyst에서 색상을 무시하는 네이티브 메뉴 대신 SwiftUI 팝오버 동작 행을 제공한다. 앱 라이브러리의 우클릭/길게 누르기 메뉴와 상세 옵션에 사용하며 destructive 빨간 글자와 비활성 secondary 색상을 행 스타일이 관리한다. iPhone/iPad는 기존 시스템 메뉴를 사용한다. LibraryView 하단 삭제 버튼은 강제 빨간 foreground를 제거하고 나머지 버튼과 동일한 prominent 스타일·빨간 배경을 복구한다. 비활성 색상은 버튼 스타일에 맡긴다. 새 UI 파일은 파일 시스템 동기화 그룹으로 앱 타깃에만 포함하며 키보드·리소스·저장 경로 변경은 없다. 테스트는 실행하지 않는다.
+
+2026-10-18 선택 작업 완료 후 종료: LibraryView·InstalledPackView는 선택 최적화의 작업 종료 후 선택 모드·선택 ID·하단 작업을 초기화한다. 선택 삭제 완료 및 PackUpdatesView의 선택 팩 확인 완료에서도 종료한다. PackTextShareSheet는 선택 링크 파일 공유의 실제 완료 콜백을 제공하며 공유 취소에는 선택을 유지한다. 링크 파일은 공유 시트가 닫히면 정리한다. 기존 파일 내부 책임 변경으로 타깃·리소스·설치 저장 경로 변경은 없다. 테스트는 실행하지 않는다.
+
+DownloadLogsView의 선택 작업 복사도 클립보드 기록 후 선택 모드와 선택 ID를 즉시 정리한다.
+
+2026-10-18 Mac 기본 메뉴 복구: 사용자 요청으로 AppActionMenu 커스텀 팝오버·보조 클릭 브리지를 철회하고 UI/AppActionMenu.swift를 삭제했다. LibraryView·InstalledPackView는 다시 시스템 contextMenu와 Menu를 사용한다. 색상을 위해 Apple 기본 메뉴를 대체하지 않는다. 하단 삭제 버튼의 prominent 배경 및 강제 foreground 제거에 따른 비활성 색상 수정은 유지한다. 파일 시스템 동기화 그룹의 앱 전용 파일 제거이며 키보드·리소스·저장 경로 변경은 없다. 테스트는 실행하지 않는다.
+
+선택 종료 빌드·설치: iPhone 15 Pro·iPad Pro 12.9 M2 실기기 Debug 및 Catalyst arm64 Release 최종 빌드 성공. 두 실기기와 Mac에 기존 데이터 유지 덮어쓰기 설치·실행 완료. Mac deep/strict 서명 확인 완료. 테스트 및 수동 UI 검증은 실행하지 않았다.
+
+2026-10-18 팩 상세 업데이트·개별 용량 표시: InstalledPackView는 PackUpdateService의 해당 팩 조회 결과를 관찰해 새로고침 후 상세 화면 안에 변경 요약과 업데이트 보기 버튼을 표시한다. 기존 비동기 팩 용량 조회에서 경로별 크기를 재사용해 스티커별 PNG·썸네일·원본 애니메이션·재생 파일의 중복 경로를 제외한 합계를 계산하고 길게 누르기/우클릭 메뉴에 표시한다. 파일·타깃·리소스·저장 경로 변경은 없으며 테스트는 실행하지 않는다.
+
+상세 업데이트·개별 용량 표시 빌드·설치: iPhone 15 Pro·iPad Pro 12.9 M2 실기기 Debug 및 Catalyst arm64 Release 빌드 성공. 두 실기기와 Mac에 기존 데이터 유지 덮어쓰기 설치·실행 완료. Mac deep/strict 서명 확인 완료. 테스트와 수동 UI 검증은 실행하지 않았다.
+
+2026-10-18 완료 햅틱 변경: Core/Background/WorkNotifications.swift는 iOS 완료 알림의 기본 sound를 제거해 시스템 알림 진동을 끈다. 앱 활성 상태에서는 알림 권한과 별개로 rigid impact 두 번(90ms 간격)의 짧은 탭틱 피드백을 제공하며 두 번째 직전 활성 상태를 다시 확인한다. 백그라운드는 무음 배너를 유지하고 Catalyst는 기존 알림음을 유지한다. 파일·타깃·리소스·저장 경로 변경은 없으며 테스트는 실행하지 않는다.
+
+완료 햅틱 빌드·설치: iPhone 15 Pro·iPad Pro 12.9 M2 실기기 Debug 및 Catalyst arm64 Release 빌드 성공. 두 실기기와 Mac 기존 앱에 데이터 유지 덮어쓰기 설치·실행 완료. Mac deep/strict 서명을 확인했다. 테스트 및 수동 햅틱 검증은 실행하지 않았다.
+
+2026-10-18 완료 진동 제거·알림 정리: WorkNotifications의 탭틱 호출과 전 플랫폼 알림 sound 및 sound 권한 요청을 제거한다. 같은 파일의 화면 수명 modifier가 가져오기·세션별 최적화·업데이트 화면의 활성 표시를 추적한다. 해당 화면 표시/재활성 시 일치하는 전달·예약 알림을 제거하고 완료 등록 전후와 foreground delegate에서도 중복 알림을 억제한다. 실패 최적화도 세션 메타데이터를 유지하며 업데이트 발견 알림은 고정 ID로 교체한다. 파일·타깃·리소스·저장 경로 변경은 없고 테스트는 실행하지 않는다.
+
+진동 제거·알림 정리 빌드·설치: iPhone 15 Pro·iPad Pro 12.9 M2 실기기 Debug 및 Catalyst arm64 Release 빌드 성공. 연결된 두 실기기와 Mac에 기존 데이터 유지 덮어쓰기 설치·실행 완료. Mac deep/strict 서명 확인 완료. 테스트·수동 UI 검증은 실행하지 않았다.
+
+2026-10-18 목록 바로 순서 변경: LibraryView의 기존 팩 드래그·드롭을 일반 모드에서도 허용한다. 길게 눌러 다른 팩 행에 놓으면 기존 LibraryModel.move와 LibraryWriter로 순서를 저장한다. 드롭의 비동기 로드 후에도 작업 상태와 앱 내부 드래그 ID를 확인한다. 편집 선택·컨텍스트 메뉴·저장 경로·타깃·리소스는 유지하며 파일 추가는 없다. 테스트는 실행하지 않는다.
+
+목록 바로 순서 변경 빌드·설치: iPhone 15 Pro·iPad Pro 12.9 M2 각각의 실기기 Debug 및 Catalyst arm64 Release 빌드 성공. 두 실기기와 Mac 기존 앱에 데이터 유지 덮어쓰기 설치·실행 완료. Mac deep/strict 서명 확인 완료. 테스트·수동 UI 검증은 실행하지 않았다.
+
+2026-10-18 버튼 기본 피드백 경로 제거: UI/AppGlassAppearance.swift의 appGlassButton은 시스템 glass/glassProminent ButtonStyle 대신 앱 소유 ButtonStyle과 비상호작용 장식 glassEffect를 사용한다. SelectionControls의 interactive glass를 제거한다. 같은 UI 파일의 AppQuietToggleStyle을 앱 루트에 적용해 기본 UISwitch의 선택 햅틱 경로를 우회하고 비활성·접근성 토글 상태를 유지한다. 앱·Shared·키보드·로컬 패키지 전체 검색에서 직접 햅틱/진동 호출은 없었다. 시스템 메뉴·탭·시스템 키보드의 OS 소유 피드백까지 제거됐다고 판정하지 않는다. 파일·타깃·리소스·저장 경로 변경은 없고 테스트는 실행하지 않는다.
+
+2026-10-18 목록 순서 변경 재수정: 이전 행 onDrag/onDrop 방식은 실제 목록에서 동작하지 않았다는 사용자 확인으로 철회한다. LibraryView는 ForEach.onMove로 List의 네이티브 행 이동을 등록하여 일반 모드 길게 누르기 이동과 편집 모드 이동 핸들을 사용한다. LibraryModel.move는 화면 순서를 먼저 반영하고 LibraryWriter로 저장하며 저장 오류 시 재로딩한다. 기존 파일·타깃·리소스·저장 경로는 유지한다. 테스트 및 수동 UI 검증은 실행하지 않는다.
+
+버튼 피드백 경로 변경 빌드·설치: iPhone 15 Pro·iPad Pro 12.9 M2 실기기 Debug 및 Catalyst arm64 Release 빌드 성공. 두 실기기는 기존 앱을 덮어쓴 후 기존 프로세스를 종료하고 새 빌드를 실행했다. Mac도 기존 앱을 백업·교체하고 실행했으며 deep/strict 서명 확인 완료. 사용자 데이터는 유지했다. 테스트 및 실제 진동 확인은 수행하지 않았다.
+
+목록 네이티브 이동 재수정 빌드·설치: iPhone 15 Pro와 iPad Pro 12.9 M2의 Debug 빌드 및 Catalyst arm64 Release 빌드 성공. 두 실기기와 Mac에 기존 데이터 유지 덮어쓰기 설치·실행 완료. Mac 서명 검증 성공. 사용자 지시에 따라 테스트·수동 UI 검증은 실행하지 않았으며 실제 길게 누르기 동작을 검증 완료한 것으로 보고하지 않는다.
+
+2026-10-19 상세 공유 버튼 보정: UI/PackLinkSharing.swift의 iPhone·iPad 공유 버튼은 시스템 SwiftUI Button·Label로 표시하고 배경의 비상호작용 UIView를 공유 팝오버의 sourceView/sourceRect로 사용한다. 앞선 UIKit 버튼 교체로 달라진 아이콘 크기·툴바 배치를 복구하고 표시와 팝오버 기준점 책임을 같은 파일에 둔다. Catalyst 기존 경로·타깃·리소스·저장 경로 변경은 없다. 테스트·수동 UI 검증은 실행하지 않는다.

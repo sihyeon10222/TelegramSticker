@@ -122,6 +122,20 @@ final class PackUpdateService {
     @ObservationIgnored private var resetting = false
     @ObservationIgnored private var installedPacks: [String: PackManifestV1] = [:]
     @ObservationIgnored private var hasSnapshot = false
+    @ObservationIgnored private var localDeletionGenerations: [String: Int] = [:]
+    @ObservationIgnored private var invalidatedChecks = Set<String>()
+
+    /// Local edits invalidate a previous check; only a new explicit check may restore it.
+    func didDeleteStickers(packID: String, telegramName: String?) async {
+        localDeletionGenerations[packID, default: 0] += 1
+        invalidatedChecks.insert(packID)
+        entries[packID] = nil
+        errors[packID] = nil
+        if let telegramName {
+            do { try await cache.remove(name: telegramName) }
+            catch { DownloadDiagnostics.shared.record("업데이트 조회 결과 제거 실패 · " + error.localizedDescription) }
+        }
+    }
 
     var updates: [PackUpdateEntry] { entries.values.filter { $0.difference.hasChanges }.sorted { $0.installed.title < $1.installed.title } }
 
@@ -130,7 +144,7 @@ final class PackUpdateService {
         reconcile(packs: packs)
         let saved = await cache.load(packs: packs)
         guard generation == self.generation else { return }
-        for entry in saved where entries[entry.id] == nil {
+        for entry in saved where entries[entry.id] == nil && !invalidatedChecks.contains(entry.id) {
             if let current = installedPacks[entry.id], current.telegramName == entry.remote.name {
                 entries[entry.id] = PackUpdateEntry(installed: current, remote: entry.remote, checkedAt: entry.checkedAt)
             }
@@ -179,6 +193,7 @@ final class PackUpdateService {
         try Task.checkCancellation()
         guard !resetting else { throw CancellationError() }
         let generation = generation
+        let deletionGeneration = localDeletionGenerations[pack.id, default: 0]
         guard let name = pack.telegramName else {
             errors[pack.id] = StickerImportError.invalidLink.localizedDescription
             throw StickerImportError.invalidLink
@@ -210,12 +225,13 @@ final class PackUpdateService {
         do {
             let remote = try await request.task.value
             try Task.checkCancellation()
-            guard self.generation == generation else { throw CancellationError() }
+            guard self.generation == generation, localDeletionGenerations[pack.id, default: 0] == deletionGeneration else { throw CancellationError() }
             guard remote.stickerType == "regular" else { throw StickerImportError.noStaticStickers }
             if hasSnapshot, installedPacks[pack.id]?.telegramName != name { throw CancellationError() }
             let entry = PackUpdateEntry(installed: installedPacks[pack.id] ?? pack, remote: remote,
                 checkedAt: remote.fetchedAt.map(Date.init(timeIntervalSince1970:)) ?? Date())
             if requests[name]?.id == request.id {
+                invalidatedChecks.remove(pack.id)
                 entries[pack.id] = entry
                 errors[pack.id] = nil
                 do { try await cache.save(entry) }
@@ -275,7 +291,7 @@ final class PackUpdateService {
                     await WorkNotifications.shared.requestAuthorizationIfNeeded()
                     if !Task.isCancelled {
                         await WorkNotifications.shared.deliver(title: "스티커 팩 업데이트", body: "업데이트할 팩이 \(available)개 있어요.",
-                            userInfo: ["packUpdates": "true"])
+                            identifier: "packUpdates", userInfo: ["packUpdates": "true"])
                     }
                 }
                 BackgroundWork.shared.end(id: background, success: failed == 0, detail: completion, cancelled: Task.isCancelled)
@@ -303,6 +319,7 @@ final class PackUpdateService {
         for task in tasks { await task.value }
         requests.removeAll(); checking.removeAll(); entries.removeAll(); errors.removeAll(); status = nil; client = nil
         installedPacks.removeAll(); hasSnapshot = false
+        localDeletionGenerations.removeAll(); invalidatedChecks.removeAll()
         try await cache.clear()
     }
 }

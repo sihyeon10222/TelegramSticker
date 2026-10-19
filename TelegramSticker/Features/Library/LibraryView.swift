@@ -16,6 +16,9 @@ struct LibraryView: View {
     @State private var packUpdatesRequest: PackUpdatesRequest?
     @State private var editMode = EditMode.inactive
     @State private var bulkSelected = Set<String>()
+    @State private var selectionOptimizationPending = false
+    @State private var sharedSelectionFile: URL?
+    @State private var sharingSelection = false
     @State private var optimizationRequest: OptimizationRequest?
     @State private var sidebarScrolling = false
     @State private var confirmBulkDelete = false
@@ -26,7 +29,6 @@ struct LibraryView: View {
     @State private var sidebarScrolledUnderToolbar = false
     @State private var editingActionsHeight: CGFloat = 0
     @State private var workBannerHeight: CGFloat = 0
-    @State private var draggingPack: String?
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -136,6 +138,7 @@ struct LibraryView: View {
                 Label("Sticker Pack 링크 공유", systemImage: "square.and.arrow.up")
             }.disabled(PackLinkList.links(for: [pack]).isEmpty)
             Button("삭제", systemImage: "trash", role: .destructive) { deletingPack = pack }
+            .foregroundStyle(.red)
                 .disabled(ImportActivity.shared.count > 0)
             }
         }
@@ -146,6 +149,7 @@ struct LibraryView: View {
                 deletingPack = nil
                 Task { await model.delete(ids: [pack.id]) }
             }
+            .foregroundStyle(.red)
         }
     }
 
@@ -226,7 +230,10 @@ struct LibraryView: View {
                 } label: { actionLabel("업데이트 확인", icon: "arrow.clockwise") }
                 .disabled(!model.packs.contains { bulkSelected.contains($0.id) && $0.telegramName != nil } || ImportActivity.shared.count > 0)
                 .appGlassButton(prominent: true, tint: .blue).accessibilityIdentifier("updateSelectedPacks")
-                Button { optimizationRequest = OptimizationRequest(packIDs: bulkSelected) } label: { actionLabel("용량 최적화", icon: "slider.horizontal.3") }
+                Button {
+                    selectionOptimizationPending = true
+                    optimizationRequest = OptimizationRequest(packIDs: bulkSelected)
+                } label: { actionLabel("용량 최적화", icon: "slider.horizontal.3") }
                     .disabled(bulkSelected.isEmpty || ImportActivity.shared.count > 0)
                     .appGlassButton(prominent: true, tint: .indigo).accessibilityIdentifier("optimizeSelectedPacks")
                 Button(role: .destructive) { confirmBulkDelete = true } label: { actionLabel("삭제", icon: "trash") }
@@ -235,9 +242,12 @@ struct LibraryView: View {
                     .confirmationDialog(LibrarySyncService.shared.enabled && LibraryChangeJournal.cloudKitConfigured ? "모든 기기에서 선택한 \(bulkSelected.count)개 팩을 삭제할까요?" : "선택한 \(bulkSelected.count)개 팩을 삭제할까요?", isPresented: $confirmBulkDelete, titleVisibility: .visible) {
                         Button("선택한 팩 삭제", role: .destructive) {
                             let ids = Array(bulkSelected)
-                            bulkSelected.removeAll()
-                            Task { await model.delete(ids: ids) }
+                            Task {
+                                await model.delete(ids: ids)
+                                SelectionControls.update { resetSelection() }
+                            }
                         }
+                        .foregroundStyle(.red)
                     }
             }
             .font(.subheadline)
@@ -289,6 +299,7 @@ struct LibraryView: View {
                             }
                             .contextMenu {
                                 Button("모든 기기에서 팩 삭제", role: .destructive) { deletingPendingPack = pack.id }
+                                .foregroundStyle(.red)
                             }
                             .confirmationDialog("모든 기기에서 이 팩을 삭제할까요?", isPresented: Binding(
                                 get: { deletingPendingPack == pack.id }, set: { if !$0 { deletingPendingPack = nil } }
@@ -297,6 +308,7 @@ struct LibraryView: View {
                                     deletingPendingPack = nil
                                     Task { await model.delete(ids: [pack.id]) }
                                 }
+                                .foregroundStyle(.red)
                             }
                         }
                     }
@@ -314,6 +326,7 @@ struct LibraryView: View {
                                 Text(pack.id)
                                 Spacer()
                                 Button("삭제", role: .destructive) { Task { await model.delete(ids: [pack.id]) } }
+                                .foregroundStyle(.red)
                             }
                         }
                     }
@@ -321,31 +334,9 @@ struct LibraryView: View {
                 Section {
                     ForEach(model.packs) { pack in
                         packNavigationRow(pack)
-                                .contentShape(Rectangle())
-                                .onDrag {
-                                    guard editMode.isEditing, !model.isBusy, model.damagedPacks.isEmpty,
-                                          ImportActivity.shared.count == 0 else { return NSItemProvider() }
-                                    draggingPack = pack.id
-                                    return NSItemProvider(object: pack.id as NSString)
-                                }
                         .tag(pack.id)
                         .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
-                        .onDrop(of: [.text], isTargeted: nil) { providers in
-                            guard editMode.isEditing, !model.isBusy, ImportActivity.shared.count == 0,
-                                  model.damagedPacks.isEmpty,
-                                  let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return false }
-                            provider.loadObject(ofClass: NSString.self) { object, _ in
-                                guard let sourceID = object as? String else { return }
-                                Task { @MainActor in
-                                    guard editMode.isEditing,
-                                          let source = model.packs.firstIndex(where: { $0.id == sourceID }),
-                                          let target = model.packs.firstIndex(where: { $0.id == pack.id }), source != target else { return }
-                                    draggingPack = nil
-                                    await model.move(from: IndexSet(integer: source), to: target > source ? target + 1 : target)
-                                }
-                            }
-                            return true
-                        }
+                        .moveDisabled(model.isBusy || !model.damagedPacks.isEmpty || ImportActivity.shared.count > 0)
                         .accessibilityIdentifier("pack.\(pack.id)")
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             Button("업데이트 확인", systemImage: "arrow.clockwise") { updatePack(pack) }
@@ -358,8 +349,13 @@ struct LibraryView: View {
                         .swipeActions(edge: .trailing) {
                             Button("삭제", systemImage: "trash", role: .destructive) {
                                 deletingPack = pack
-                            }.labelStyle(.iconOnly)
+                            }.labelStyle(.iconOnly).foregroundStyle(.red)
                         }
+                    }
+                    .onMove { source, destination in
+                        guard !model.isBusy, model.damagedPacks.isEmpty,
+                              ImportActivity.shared.count == 0 else { return }
+                        Task { await model.move(from: source, to: destination) }
                     }
 
                 }
@@ -406,9 +402,20 @@ struct LibraryView: View {
                     Group {
                         if sharing {
                             let links = PackLinkList.links(for: model.packs.filter { bulkSelected.contains($0.id) })
-                            ShareLink(item: StickerLinkFile(text: links.joined(separator: "\n")), preview: SharePreview("스티커 팩 링크 목록")) {
-                                Label("선택한 팩 공유", systemImage: "square.and.arrow.up")
-                            }
+                            Button {
+                                do {
+                                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                                    let file = directory.appendingPathComponent("LinkList.stickerlinks")
+                                    sharedSelectionFile = file
+                                    try Data(links.joined(separator: "\n").utf8).write(to: file, options: .atomic)
+                                    sharingSelection = true
+                                } catch {
+                                    if let file = sharedSelectionFile { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+                                    sharedSelectionFile = nil
+                                    model.message = error.localizedDescription
+                                }
+                            } label: { Label("선택한 팩 공유", systemImage: "square.and.arrow.up") }
                             .disabled(links.isEmpty)
                             .appGlassButton(prominent: true).controlSize(.large).padding(12)
                         } else { packEditingActions() }
@@ -503,12 +510,24 @@ struct LibraryView: View {
             selected = nil
         }
         .onChange(of: PackLinkInbox.shared.received?.id) { _, received in if received == nil { Task { await model.refresh() } } }
+        .sheet(isPresented: $sharingSelection, onDismiss: {
+            if let file = sharedSelectionFile { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+            sharedSelectionFile = nil
+        }) {
+            if let file = sharedSelectionFile {
+                PackTextShareSheet(text: "", fileURL: file, onCompleted: {
+                    SelectionControls.update { resetSelection() }
+                })
+            }
+        }
         .sheet(item: $sharingPack) { pack in PackTextShareSheet(text: PackLinkList.links(for: [pack]).joined(separator: "\n")) }
         .sheet(item: $importRequest, onDismiss: { Task { await model.refresh() } }) { request in
             if let writer = model.writer { ImportView(writer: writer, initialPackName: request.name, updating: request.updating, initialLinks: request.links, initialPackTitle: request.title) }
         }
         .sheet(item: $packUpdatesRequest, onDismiss: { Task { await model.refresh() } }) { request in
-            PackUpdatesView(request: request)
+            PackUpdatesView(request: request, onCheckCompleted: {
+                if request.packIDs != nil { SelectionControls.update { resetSelection() } }
+            })
         }
         .sheet(item: $optimizationRequest, onDismiss: { Task { await model.refresh() } }) { request in
             OptimizationView(request: request)
@@ -525,8 +544,16 @@ struct LibraryView: View {
         .onChange(of: activeTab) { _, tab in
             if tab != .library { resetSelection() }
         }
-        .onChange(of: ImportActivity.shared.libraryChangeID) { _, _ in Task { await model.refresh() } }
-        .onChange(of: ImportActivity.shared.count) { _, count in if count == 0 { Task { await model.refresh() } } }
+        .onChange(of: ImportActivity.shared.libraryChangeID) { _, _ in
+            if selectionOptimizationPending { SelectionControls.update { resetSelection() } }
+            Task { await model.refresh() }
+        }
+        .onChange(of: ImportActivity.shared.count) { previous, count in
+            if previous > 0, count == 0, selectionOptimizationPending {
+                SelectionControls.update { resetSelection() }
+            }
+            if count == 0 { Task { await model.refresh() } }
+        }
         .task {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--keyboard-ui-fixture"), let writer = model.writer {
@@ -567,12 +594,12 @@ struct LibraryView: View {
     }
 
     private func resetSelection() {
+        selectionOptimizationPending = false
         editMode = .inactive
         sharing = false
         bulkSelected.removeAll()
         confirmBulkDelete = false
         deletingPack = nil
-        draggingPack = nil
     }
 
 }

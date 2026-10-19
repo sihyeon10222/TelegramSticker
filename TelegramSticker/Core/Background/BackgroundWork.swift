@@ -11,10 +11,10 @@ final class BackgroundWork {
     private let logger = Logger(subsystem: "com.sihyeon.TelegramSticker", category: "BackgroundWork")
     var notice: String?
     enum Kind: Sendable {
-        case download, update, updateCheck, restoreOriginal, optimizationPreparation, optimizationApply
+        case download, update, updateCheck, restoreOriginal, optimizationApply
         var sendsCompletion: Bool {
             switch self {
-            case .download, .update, .restoreOriginal, .optimizationPreparation, .optimizationApply: true
+            case .download, .update, .restoreOriginal, .optimizationApply: true
             case .updateCheck: false
             }
         }
@@ -147,7 +147,7 @@ final class BackgroundWork {
         #endif
         if job.kind.sendsCompletion, !cancelled {
             WorkNotifications.shared.send(title: job.title + (success ? " 완료" : " 종료 · 확인 필요"),
-                                          body: detail ?? job.subtitle, identifier: id, userInfo: success ? notificationInfo : [:])
+                                          body: detail ?? job.subtitle, identifier: id, userInfo: notificationInfo)
         }
     }
 }

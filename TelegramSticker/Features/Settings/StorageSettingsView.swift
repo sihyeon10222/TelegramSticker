@@ -18,10 +18,12 @@ struct StorageSettingsView: View {
             Spacer(minLength: 0)
             Text(ByteCountFormatter.string(fromByteCount: installed, countStyle: .file)).foregroundStyle(.secondary)
             Button("데이터 삭제", systemImage: "trash", role: .destructive) { confirmDataDelete = true }
+            .foregroundStyle(.red)
                 .labelStyle(.iconOnly).appGlassButton().disabled(deletionDisabled || installed == 0)
                 .accessibilityIdentifier("deleteInstalledData")
                 .confirmationDialog("설치한 스티커 팩을 모두 삭제할까요?", isPresented: $confirmDataDelete, titleVisibility: .visible) {
                     Button("설치 데이터 삭제", role: .destructive) { deleteInstalledData() }
+                    .foregroundStyle(.red)
                     Button("취소", role: .cancel) { }
                 } message: { Text("설치한 팩이 앱과 키보드에서 삭제돼요. 앱 설정은 유지돼요.") }
         }
@@ -29,7 +31,8 @@ struct StorageSettingsView: View {
             Text("삭제 가능한 캐시")
             Spacer(minLength: 0)
             Text(ByteCountFormatter.string(fromByteCount: disposable, countStyle: .file)).foregroundStyle(.secondary)
-            Button("캐시 삭제", systemImage: "eraser", action: clearCache)
+            Button("캐시 삭제", systemImage: "eraser", role: .destructive, action: clearCache)
+                .foregroundStyle(.red)
                 .labelStyle(.iconOnly).appGlassButton().disabled(deletionDisabled)
                 .accessibilityIdentifier("clearCache")
         }
@@ -59,15 +62,14 @@ struct StorageSettingsView: View {
         }
         if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
     }
-    private func invalidateOptimization(deleteFiles: Bool = true) {
-        OptimizationCenter.shared.current?.removeDrafts(deleteFiles: deleteFiles)
+    private func invalidateOptimization() {
         OptimizationCenter.shared.current = nil
         OptimizationCenter.shared.presented = nil
     }
     private func clearCache() {
         guard !deletionDisabled else { return }
         clearing = true
-        invalidateOptimization(deleteFiles: false)
+        invalidateOptimization()
         ImportActivity.shared.count += 1
         Task {
             defer { clearing = false; ImportActivity.shared.count -= 1 }

@@ -5,7 +5,6 @@ struct DownloadLogsView: View {
     @Environment(\.activeAppTab) private var activeTab
     @State private var selection = Set<UUID>()
     @State private var selecting = false
-    @State private var copied = false
     private var store: DownloadDiagnostics { .shared }
     private var operations: [DownloadLogOperation] { Array(store.operations.reversed()) }
     var body: some View {
@@ -34,12 +33,13 @@ struct DownloadLogsView: View {
         .navigationTitle("다운로드 로그")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                SelectionToggleButton(active: selecting, title: "선택") { selecting.toggle(); selection.removeAll(); copied = false }
+                SelectionToggleButton(active: selecting, title: "선택") { selecting.toggle(); selection.removeAll() }
                     .disabled(operations.isEmpty)
             }
             .sharedBackgroundVisibility(.visible)
             ToolbarItem(placement: .topBarTrailing) {
                 Button("비우기", role: .destructive) { store.clear(); selection.removeAll(); selecting = false }
+                .foregroundStyle(.red)
                     .disabled(operations.isEmpty)
             }
         }
@@ -47,15 +47,16 @@ struct DownloadLogsView: View {
             if selecting {
                 HStack {
                     Spacer()
-                    Button(copied ? "복사됨" : "작업 복사 (\(selection.count))") {
-                        copyDiagnosticText(store.export(selection)); copied = true
+                    Button("작업 복사 (\(selection.count))") {
+                        copyDiagnosticText(store.export(selection))
+                        selecting = false
+                        selection.removeAll()
                     }.disabled(selection.isEmpty)
                 }.font(.subheadline).padding(12).background(.bar)
             }
         }
-        .onChange(of: selection) { _, _ in copied = false }
         .onChange(of: activeTab) { _, tab in
-            if tab != .settings { selecting = false; selection.removeAll(); copied = false }
+            if tab != .settings { selecting = false; selection.removeAll() }
         }
     }
     private func row(_ operation: DownloadLogOperation) -> some View {

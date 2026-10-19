@@ -3,11 +3,11 @@ import ImageIO
 import UniformTypeIdentifiers
 
 nonisolated enum StorageOptimizationProfile: String, CaseIterable, Identifiable, Sendable, Hashable {
-    case compact, balanced
+    case compact
     var id: String { rawValue }
-    var pixels: Int { self == .balanced ? 384 : 256 }
-    var fps: Int { self == .balanced ? 24 : 15 }
-    var title: String { self == .balanced ? "화질 우선" : "용량 우선" }
+    var pixels: Int { 256 }
+    var fps: Int { 15 }
+    var title: String { "용량 우선" }
     var label: String { "용량 최적화 · \(pixels)px · 최대 \(fps)fps" }
 }
 nonisolated enum StorageOptimizationError: Error { case noSavings }
@@ -18,7 +18,7 @@ nonisolated struct StorageOptimizationResult: Sendable {
 }
 
 nonisolated enum StickerStorageOptimizer {
-    static let label = StorageOptimizationProfile.balanced.label
+    static let label = StorageOptimizationProfile.compact.label
     static func bytes(_ url: URL) throws -> Int64 {
         let fm = FileManager.default
         let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
@@ -26,7 +26,7 @@ nonisolated enum StickerStorageOptimizer {
         if values.isDirectory != true { return Int64(values.fileSize ?? 0) }
         return try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil).reduce(0) { try $0 + bytes($1) }
     }
-    static func png(from url: URL, to output: URL, pixels: Int = 384) throws {
+    static func png(from url: URL, to output: URL, pixels: Int = 256) throws {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: pixels,
@@ -40,7 +40,7 @@ nonisolated enum StickerStorageOptimizer {
 
 extension LibraryWriter {
     /// No await: publication, deletion, updates and optimization cannot race this transaction.
-    func optimizeStorage(packIDs: Set<String>? = nil, stickerIDs: Set<String>? = nil, profile: StorageOptimizationProfile = .balanced, retainOldRevisions: Bool = false, progress: @Sendable (Int, Int) -> Void = { _, _ in }) throws -> StorageOptimizationResult {
+    func optimizeStorage(packIDs: Set<String>? = nil, stickerIDs: Set<String>? = nil, profile: StorageOptimizationProfile = .compact, retainOldRevisions: Bool = false, progress: @Sendable (Int, Int) -> Void = { _, _ in }) throws -> StorageOptimizationResult {
         let snapshot = try reader.snapshot()
         guard snapshot.warnings.isEmpty else { throw LibraryError.invalidIndex }
         var result = StorageOptimizationResult()
@@ -107,106 +107,6 @@ extension LibraryWriter {
             } catch is CancellationError { throw CancellationError() }
             catch StorageOptimizationError.noSavings { continue }
             catch { result.failures.append("\(pack.title): \(error.localizedDescription)") }
-        }
-        return result
-    }
-}
-
-nonisolated struct OptimizationComparison: Identifiable, Sendable {
-    let id: String
-    let original: Sticker
-    let optimized: Sticker
-    let before: Int64
-    let after: Int64
-}
-nonisolated struct PreparedOptimization: Sendable {
-    let root: URL
-    let originals: [PackManifestV1]
-    let comparisons: [OptimizationComparison]
-    let before: Int64
-    let after: Int64
-    let failures: [String]
-    var saved: Int64 { max(0, before - after) }
-}
-
-extension LibraryWriter {
-    /// Prepare against an isolated copy. No installed revision or clipboard is changed.
-    func prepareOptimization(packIDs: Set<String>?, stickerIDs: Set<String>?, profile: StorageOptimizationProfile,
-                             progress: @escaping @Sendable (Int, Int) -> Void) async throws -> PreparedOptimization {
-        let snapshot = try reader.snapshot()
-        guard snapshot.warnings.isEmpty else { throw LibraryError.invalidIndex }
-        let originals = snapshot.packs.filter { packIDs == nil || packIDs!.contains($0.id) }
-        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("StickerOptimization-" + UUID().uuidString)
-        let shadowReader = LibraryReader(root: root), fm = FileManager.default
-        try fm.createDirectory(at: root, withIntermediateDirectories: true)
-        var prepared = false
-        defer { if !prepared { try? fm.removeItem(at: root) } }
-        var index = try reader.index()
-        index.packs = index.packs.filter { ref in originals.contains { $0.id == ref.id } }
-        var before: Int64 = 0
-        for pack in originals {
-            try Task.checkCancellation()
-            let relative = "packs/\(pack.id)/\(pack.revision)"
-            let source = try reader.file(relative), destination = try shadowReader.file(relative)
-            before += try StickerStorageOptimizer.bytes(source)
-            try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try fm.copyItem(at: source, to: destination)
-        }
-        try JSONEncoder().encode(index).write(to: shadowReader.file("index.json"), options: .atomic)
-        let shadowWriter = LibraryWriter(reader: shadowReader)
-        let result = try await shadowWriter.optimizeStorage(packIDs: packIDs, stickerIDs: stickerIDs, profile: profile, retainOldRevisions: true, progress: progress)
-        try Task.checkCancellation()
-        let optimized = try shadowReader.snapshot().packs
-        var comparisons: [OptimizationComparison] = []
-        var after: Int64 = 0
-        for pack in optimized {
-            after += try StickerStorageOptimizer.bytes(shadowReader.file("packs/\(pack.id)/\(pack.revision)"))
-            guard let original = originals.first(where: { $0.id == pack.id }) else { continue }
-            for sticker in pack.stickers {
-                try Task.checkCancellation()
-                let id = pack.id + "." + sticker.id
-                guard stickerIDs == nil || stickerIDs!.contains(id), let old = original.stickers.first(where: { $0.id == sticker.id }) else { continue }
-                let oldPNG = try shadowReader.file(old.pngPath), newPNG = try shadowReader.file(sticker.pngPath)
-                let oldGIF = try old.animationPath.map { try shadowReader.file($0) }, newGIF = try sticker.animationPath.map { try shadowReader.file($0) }
-                let oldBytes = try StickerStorageOptimizer.bytes(oldPNG) + (try oldGIF.map { try StickerStorageOptimizer.bytes($0) } ?? 0)
-                let newBytes = try StickerStorageOptimizer.bytes(newPNG) + (try newGIF.map { try StickerStorageOptimizer.bytes($0) } ?? 0)
-                comparisons.append(OptimizationComparison(id: id,
-                    original: Sticker(id: id + ".original", name: sticker.name, detail: original.title, imageURL: oldPNG, animationURL: oldGIF),
-                    optimized: Sticker(id: id + ".optimized", name: sticker.name, detail: pack.title, imageURL: newPNG, animationURL: newGIF), before: oldBytes, after: newBytes))
-            }
-        }
-        prepared = true
-        return PreparedOptimization(root: root, originals: originals, comparisons: comparisons, before: before, after: after, failures: result.failures)
-    }
-
-    func applyOptimization(_ draft: PreparedOptimization, progress: @Sendable (Int, Int) -> Void = { _, _ in }) throws -> StorageOptimizationResult {
-        let shadow = LibraryReader(root: draft.root)
-        let packs = try shadow.snapshot().packs
-        var result = StorageOptimizationResult(failures: draft.failures)
-        for (offset, original) in draft.originals.enumerated() {
-            try Task.checkCancellation()
-            defer { progress(offset + 1, draft.originals.count) }
-            guard let optimized = packs.first(where: { $0.id == original.id }), optimized.revision != original.revision else { continue }
-            do {
-                guard try hasRevision(id: original.id, revision: original.revision) else { throw LibraryError.invalidOrder }
-                let oldDirectory = try reader.file("packs/\(original.id)/\(original.revision)")
-                let before = try StickerStorageOptimizer.bytes(oldDirectory)
-                let inputs = try optimized.stickers.map { record in
-                    LocalStickerInput(id: record.id, name: record.name, url: try shadow.file(record.pngPath), sourceFormat: record.sourceFormat ?? "png",
-                        animationURL: try record.animationPath.map { try shadow.file($0) }, conversionQuality: record.conversionQuality,
-                        reusableFiles: ReusableStickerFiles(reader: shadow, packID: optimized.id, revision: optimized.revision, record: record))
-                }
-                try install(id: original.id, title: original.title, stickers: inputs, originalCount: original.originalCount,
-                    telegramName: original.telegramName, pendingStickerIDs: original.pendingStickerIDs,
-                    replacingRevision: original.revision, lastCheckedAt: original.lastCheckedAt, maximumStoredBytes: before)
-                guard let current = try pack(id: original.id) else { throw LibraryError.invalidIndex }
-                let after = try StickerStorageOptimizer.bytes(reader.file("packs/\(current.id)/\(current.revision)"))
-                result.optimizedPacks += 1
-                do { try FileManager.default.removeItem(at: oldDirectory); result.saved += max(0, before - after) }
-                catch { result.failures.append("\(original.title): 이전 파일 정리 실패. 캐시 삭제로 다시 정리해 주세요.") }
-            } catch StorageOptimizationError.noSavings { continue }
-            catch is CancellationError { throw CancellationError() }
-            catch { result.failures.append("\(original.title): \(error.localizedDescription)") }
         }
         return result
     }

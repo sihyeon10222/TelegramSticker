@@ -62,7 +62,7 @@ struct SelectionToggleButton: View {
         }
         .buttonStyle(.plain)
         .fixedSize()
-        .glassEffect(active ? .regular.tint(.blue).interactive() : .regular.interactive(), in: .capsule)
+        .glassEffect(active ? .regular.tint(.blue) : .regular, in: .capsule)
         // Rehosting the toolbar during a split transition must not materialize
         // the glass from a point. Its existing shape follows the toolbar item.
         .glassEffectTransition(.identity)

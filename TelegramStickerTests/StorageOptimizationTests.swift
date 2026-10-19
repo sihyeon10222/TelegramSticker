@@ -28,7 +28,7 @@ struct StorageOptimizationTests {
         #expect(!FileManager.default.fileExists(atPath: try reader.file("packs/first/\(before.revision)").path))
         let source = try #require(CGImageSourceCreateWithURL(reader.file(after.stickers[0].pngPath) as CFURL, nil))
         let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
-        #expect(image.width == 384 && image.height == 384)
+        #expect(image.width == 256 && image.height == 256)
         #expect(image.alphaInfo != .none && image.alphaInfo != .noneSkipLast && image.alphaInfo != .noneSkipFirst)
         let again = try await writer.optimizeStorage()
         #expect(again.saved == 0 && again.optimizedPacks == 0)
@@ -45,39 +45,16 @@ struct StorageOptimizationTests {
         let record = try reader.snapshot().packs[0].stickers[0]
         #expect(try PNGValidation.isValid(Data(contentsOf: reader.file(record.pngPath))))
     }
-    @Test func comparisonDoesNotChangeInstalledFilesAndAppliesOnlySelectedPack() async throws {
+    @Test func optimizationAppliesOnlySelectedPackAndSticker() async throws {
         let (reader, writer) = try await fixture()
         defer { try? FileManager.default.removeItem(at: reader.root.deletingLastPathComponent()) }
         let first = try reader.snapshot().packs[0]
         try await writer.install(id: "second", title: "두 번째", stickers: writer.inputs(for: first))
-        let before = try Data(contentsOf: reader.file("index.json"))
         let secondRevision = try reader.snapshot().packs[1].revision
-        let draft = try await writer.prepareOptimization(packIDs: ["first"], stickerIDs: ["first.one"], profile: .balanced, progress: { _, _ in })
-        defer { try? FileManager.default.removeItem(at: draft.root) }
-        #expect(draft.saved > 0 && draft.comparisons.count == 1)
-        #expect(try Data(contentsOf: reader.file("index.json")) == before)
-        let item = draft.comparisons[0]
-        #expect(item.after < item.before)
-        let oldSource = try #require(CGImageSourceCreateWithURL(item.original.imageURL! as CFURL, nil))
-        let newSource = try #require(CGImageSourceCreateWithURL(item.optimized.imageURL! as CFURL, nil))
-        #expect(try #require(CGImageSourceCreateImageAtIndex(oldSource, 0, nil)).width == 512)
-        #expect(try #require(CGImageSourceCreateImageAtIndex(newSource, 0, nil)).width == 384)
-        let receipt = try await writer.applyOptimization(draft)
-        #expect(receipt.saved == draft.saved && receipt.optimizedPacks == 1 && receipt.failures.isEmpty)
-        // Original stays available in the isolated comparison even after installed assets change.
-        #expect(FileManager.default.fileExists(atPath: item.original.imageURL!.path))
-        #expect(FileManager.default.fileExists(atPath: item.optimized.imageURL!.path))
+        let result = try await writer.optimizeStorage(packIDs: ["first"], stickerIDs: ["first.one"])
+        #expect(result.saved > 0 && result.optimizedPacks == 1 && result.failures.isEmpty)
+        #expect(try reader.snapshot().packs[0].revision != first.revision)
         #expect(try reader.snapshot().packs[1].revision == secondRevision)
-    }
-    @Test func comparisonCannotOverwriteNewRevisionOrResurrectDeletedPack() async throws {
-        let (reader, writer) = try await fixture()
-        defer { try? FileManager.default.removeItem(at: reader.root.deletingLastPathComponent()) }
-        let draft = try await writer.prepareOptimization(packIDs: ["first"], stickerIDs: nil, profile: .balanced, progress: { _, _ in })
-        defer { try? FileManager.default.removeItem(at: draft.root) }
-        try await writer.delete(id: "first")
-        let result = try await writer.applyOptimization(draft)
-        #expect(result.optimizedPacks == 0 && result.failures.count == 1)
-        #expect(try reader.snapshot().packs.isEmpty)
     }
 
     @Test func gifResamplingPreservesTimelineAndLoop() async throws {

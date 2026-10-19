@@ -76,12 +76,13 @@ final class LibraryModel {
         guard let writer, !isBusy else { return }
         var reordered = packs
         reordered.move(fromOffsets: from, toOffset: to)
+        packs = reordered
         isBusy = true
         defer { isBusy = false }
         do {
             try await writer.reorder(ids: reordered.map(\.id))
             await refresh()
-        } catch { message = error.localizedDescription }
+        } catch { message = error.localizedDescription; await reloadPreservingMessage() }
     }
 
     private func reloadPreservingMessage() async {

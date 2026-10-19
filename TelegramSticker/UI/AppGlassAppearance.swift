@@ -14,17 +14,7 @@ extension View {
     /// Catalyst's iPad idiom can corrupt stretched Liquid Glass button surfaces.
     /// Keep the shared layout while using an ordinary material surface on Mac.
     @ViewBuilder func appGlassButton(prominent: Bool = false, tint: Color? = nil) -> some View {
-        #if targetEnvironment(macCatalyst)
-        buttonStyle(CatalystMaterialButtonStyle(prominent: prominent, tint: tint))
-        #else
-        if let tint {
-            if prominent { buttonStyle(.glassProminent).tint(tint) }
-            else { buttonStyle(.glass).tint(tint) }
-        } else {
-            if prominent { buttonStyle(.glassProminent) }
-            else { buttonStyle(.glass) }
-        }
-        #endif
+        buttonStyle(AppQuietGlassButtonStyle(prominent: prominent, tint: tint))
     }
 
     @ViewBuilder func appGlassPanel(cornerRadius: CGFloat) -> some View {
@@ -79,8 +69,7 @@ struct AppGlassContainer<Content: View>: View {
     }
 }
 
-#if targetEnvironment(macCatalyst)
-private struct CatalystMaterialButtonStyle: ButtonStyle {
+private struct AppQuietGlassButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.controlSize) private var controlSize
     let prominent: Bool
@@ -103,20 +92,49 @@ private struct CatalystMaterialButtonStyle: ButtonStyle {
             .padding(.vertical, padding.vertical)
             .frame(minHeight: padding.height)
             .foregroundStyle(isEnabled ? (prominent ? Color.white : configuration.role == .destructive ? Color.red : Color.primary) : Color.secondary)
-            .background {
-                ZStack {
-                    Capsule().fill(.regularMaterial)
-                    // Keep the tint above the material so prominent labels retain contrast.
-                    if prominent {
-                        Capsule().fill(isEnabled ? color : Color.secondary.opacity(0.12))
-                    }
-                }
-            }
-            .overlay {
-                Capsule().strokeBorder(Color.primary.opacity(isEnabled ? 0.14 : 0.07), lineWidth: 0.5)
-            }
+            .modifier(AppQuietButtonSurface(color: prominent ? (isEnabled ? color : Color.secondary.opacity(0.12)) : nil))
             .contentShape(Capsule())
             .opacity(configuration.isPressed && isEnabled ? 0.75 : 1)
     }
 }
-#endif
+
+private struct AppQuietButtonSurface: ViewModifier {
+    let color: Color?
+    @ViewBuilder func body(content: Content) -> some View {
+        #if targetEnvironment(macCatalyst)
+        content.background {
+            ZStack {
+                Capsule().fill(.regularMaterial)
+                if let color { Capsule().fill(color) }
+            }
+        }
+        #else
+        // Decorative glass only: native glass button styles and interactive
+        // glass own their system press feedback, independently of our haptic code.
+        content.glassEffect(color.map { .regular.tint($0) } ?? .regular, in: .capsule)
+        #endif
+    }
+}
+
+/// A switch drawn with a plain button avoids the native switch's selection haptic.
+struct AppQuietToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button { configuration.isOn.toggle() } label: {
+            HStack {
+                configuration.label
+                Spacer()
+                Capsule()
+                    .fill(configuration.isOn ? Color.accentColor : Color.secondary.opacity(0.25))
+                    .frame(width: 51, height: 31)
+                    .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                        Circle().fill(.white).frame(width: 27, height: 27).padding(2)
+                    }
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(configuration.isOn ? Text("켬") : Text("끔"))
+        .accessibilityAddTraits(configuration.isOn ? [.isToggle, .isSelected] : [.isToggle])
+    }
+}

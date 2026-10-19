@@ -66,7 +66,7 @@ struct ContentView: View {
                 imports.optimizationSuggestion = nil
             }
             Button("나중에", role: .cancel) { imports.optimizationSuggestion = nil }
-        } message: { Text("이번에 받은 스티커만 화질을 비교하고 최적화해요. 기존 스티커는 유지해요.") }
+        } message: { Text("이번에 받은 스티커만 용량을 최적화해 바로 적용해요. 기존 스티커는 유지해요.") }
         .sheet(item: $linkInbox.received) { ReceivedPackLinksView(received: $0) }
         .fileImporter(isPresented: $linkInbox.showFileImporter, allowedContentTypes: [UTType(filenameExtension: "stickerlinks") ?? .plainText, .plainText]) { result in
             switch result {
@@ -85,10 +85,10 @@ struct ContentView: View {
             }
             .interactiveDismissDisabled()
         }
-        .alert("비교 버전을 다시 준비해 주세요", isPresented: $optimizationNotificationError) {
+        .alert("최적화 결과를 열 수 없어요", isPresented: $optimizationNotificationError) {
             Button("확인", role: .cancel) {}
         } message: {
-            Text("알림의 비교 결과가 만료되었거나 앱 종료 후 사라졌어요. 팩에서 용량 최적화를 열어 비교 버전을 다시 만들어 주세요.")
+            Text("앱 종료 후 이전 작업 결과를 열 수 없어요. 설치된 팩에서 현재 상태를 확인해 주세요.")
         }
         .task(id: notifications.pendingOptimization?.id) {
             guard let destination = notifications.pendingOptimization else { return }
@@ -106,8 +106,7 @@ struct ContentView: View {
                 do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
             }
             guard !Task.isCancelled else { return }
-            guard let session = optimizations.current, session.id.uuidString == destination.sessionID,
-                  await session.openPreparedProfile(destination.profile) else {
+            guard let session = optimizations.current, session.id.uuidString == destination.sessionID else {
                 notifications.pendingOptimization = nil
                 optimizationNotificationError = true
                 return

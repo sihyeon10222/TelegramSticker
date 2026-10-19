@@ -8,8 +8,7 @@ final class OptimizationCenter {
     var current: OptimizationSession?
     var presented: OptimizationSession?
     func session(for request: OptimizationRequest) -> OptimizationSession {
-        if let current, current.running || (current.request.packIDs == request.packIDs && current.request.stickerIDs == request.stickerIDs) { return current }
-        current?.removeDrafts()
+        if let current, current.running || current.request.id == request.id { return current }
         let session = OptimizationSession(request: request)
         current = session
         return session

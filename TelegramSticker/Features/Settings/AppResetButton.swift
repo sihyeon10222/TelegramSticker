@@ -36,7 +36,6 @@ struct AppResetButton: View {
                 WorkNotifications.shared.pendingPackUpdates = false
                 SyncDownloadCoordinator.shared.reconcile()
                 guard let writer = LibraryWriter.shared else { throw LibraryError.unavailable }
-                OptimizationCenter.shared.current?.removeDrafts(deleteFiles: false)
                 OptimizationCenter.shared.current = nil; OptimizationCenter.shared.presented = nil
                 let jobs = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ImportJobs")
                 try await ImportJobCache.shared.reset(root: jobs, writer: writer)

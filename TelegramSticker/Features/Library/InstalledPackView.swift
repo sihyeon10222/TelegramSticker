@@ -19,12 +19,14 @@ struct InstalledPackView: View {
     @State private var status = "두 손가락으로 확대하거나 축소할 수 있어요."
     @FocusState private var commandFocus: Bool
     @State private var focusedStickerID: String?
-    @State private var copiedID: String?
+    @State private var copyGenerations: [String: Int] = [:]
     @State private var sharedPNG: SharedPNG?
     @State private var permissionWarning = false
     @State private var confirmDelete = false
     @State private var confirmStickerDelete = false
+    @State private var deletionIDs = Set<String>()
     @State private var selecting = false
+    @State private var selectionOptimizationPending = false
     @State private var selectedStickers = Set<String>()
     @State private var stickerFrames: [String: CGRect] = [:]
     @State private var selectionGestureGeneration = 0
@@ -34,6 +36,7 @@ struct InstalledPackView: View {
     @GestureState private var pinching = false
     @State private var suppressTapUntil = Date.distantPast
     @State private var storageBytes: Int64?
+    @State private var stickerStorageBytes: [String: Int64] = [:]
 
     private var usesLandscapeTitle: Bool {
         #if targetEnvironment(macCatalyst)
@@ -91,6 +94,17 @@ struct InstalledPackView: View {
                     Text(status).font(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("installedCopyStatus")
                 }
+                if let entry = PackUpdateService.shared.entries[pack.id], entry.difference.hasChanges {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("업데이트할 내용이 있어요").font(.headline)
+                        Text(entry.difference.summary).font(.caption).foregroundStyle(.secondary)
+                        Button("업데이트 보기", action: update)
+                            .accessibilityIdentifier("installedPackUpdates")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                }
                 if let pending = pack.pendingStickerIDs, !pending.isEmpty {
                     HStack {
                         Text("\(pack.originalCount)개 중 \(pack.stickers.count)개 설치 · 실패 \(pending.count)개")
@@ -109,8 +123,9 @@ struct InstalledPackView: View {
                                 paused: scrolling || pinching || activeTab != .library || scenePhase != .active || reduceMotion)
                             .accessibilityHidden(true)
                             .allowsHitTesting(false)
+                            .modifier(StickerCopyFeedback(generation: copyGenerations[sticker.id, default: 0], reduceMotion: reduceMotion))
                             .padding(3).frame(maxWidth: .infinity).frame(height: cellWidth)
-                            .background((copiedID == sticker.id || focusedStickerID == sticker.id) ? Color.accentColor.opacity(0.12) : Color(uiColor: .tertiarySystemFill).opacity(0.35),
+                            .background(Color(uiColor: .tertiarySystemFill).opacity(0.35),
                                         in: RoundedRectangle(cornerRadius: 10))
                             .overlay(alignment: .topTrailing) {
                                 if selecting {
@@ -148,14 +163,25 @@ struct InstalledPackView: View {
                             }
                         }
                         .accessibilityLabel(sticker.animationURL == nil ? sticker.name : "\(sticker.name), 애니메이션")
-                        .accessibilityHint(selecting ? "탭하면 선택하거나 해제해요." : "탭하면 바로 복사해요. 길게 누르거나 우클릭하면 복사와 공유 옵션을 열 수 있어요.")
+                        .accessibilityHint(selecting ? "탭하면 선택하거나 해제해요." : "탭하면 바로 복사해요. 길게 누르거나 우클릭하면 복사, 공유, 용량 최적화와 삭제 옵션을 열 수 있어요.")
                         .accessibilityAddTraits(.isButton)
                         .accessibilityAddTraits(selecting && selectedStickers.contains(sticker.id) ? .isSelected : [])
                         .accessibilityIdentifier("installedCopy.\(sticker.id)")
                         .contextMenu {
+                            if let bytes = stickerStorageBytes[sticker.id] {
+                                Text("저장 용량 \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))")
+                            }
                             Button("복사", systemImage: "doc.on.doc") { copy(sticker) }
                             if sticker.animationURL != nil { Button("PNG로 복사", systemImage: "photo") { copy(sticker, asPNG: true) } }
                             Button("공유", systemImage: "square.and.arrow.up") { share(sticker, animated: sticker.animationURL != nil) }
+                            Button("용량 최적화", systemImage: "slider.horizontal.3") { optimize([sticker.id]) }
+                                .disabled(ImportActivity.shared.count > 0)
+                            Button("삭제", systemImage: "trash", role: .destructive) {
+                                deletionIDs = [sticker.id]
+                                confirmStickerDelete = true
+                            }
+                            .foregroundStyle(.red)
+                            .disabled(ImportActivity.shared.count > 0)
                         }
                     }
                 }
@@ -219,6 +245,14 @@ struct InstalledPackView: View {
             columnCount = (2...10).contains(savedColumnCount) ? savedColumnCount : (sizeClass == .regular ? 5 : 4)
             pinchStartColumns = nil
         }
+        .onChange(of: ImportActivity.shared.libraryChangeID) { _, _ in
+            if selectionOptimizationPending { SelectionControls.update { resetSelection() } }
+        }
+        .onChange(of: ImportActivity.shared.count) { previous, count in
+            if previous > 0, count == 0, selectionOptimizationPending {
+                SelectionControls.update { resetSelection() }
+            }
+        }
         .onChange(of: activeTab) { _, tab in
             if tab != .library { resetSelection() }
         }
@@ -252,33 +286,34 @@ struct InstalledPackView: View {
             }
             Button("확인", role: .cancel) {}
         } message: { Text("앱에서 복사는 가능하지만, 키보드에서 복사하려면 전체 접근이 필요해요. 설정 → StickerBridge → 키보드에서 허용하고 키보드를 한 번 열어 주세요.") }
-        .confirmationDialog(LibrarySyncService.shared.enabled && LibraryChangeJournal.cloudKitConfigured ? "모든 기기에서 이 팩을 삭제할까요?" : "이 팩을 삭제할까요?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("팩 삭제", role: .destructive) { Task { await delete(); dismiss() } }
-        }
-        .confirmationDialog("선택한 \(selectedStickers.count)개 스티커를 삭제할까요?", isPresented: $confirmStickerDelete, titleVisibility: .visible) {
-            Button("선택한 스티커 삭제", role: .destructive) {
-                let ids = Set(pack.stickers.filter { selectedStickers.contains(pack.id + "." + $0.id) }.map(\.id))
+        .confirmationDialog("\(deletionIDs.count)개 스티커를 삭제할까요?", isPresented: $confirmStickerDelete, titleVisibility: .visible) {
+            Button("스티커 삭제", role: .destructive) {
+                let ids = Set(pack.stickers.filter { deletionIDs.contains(pack.id + "." + $0.id) }.map(\.id))
                 Task {
                     do {
                         guard let writer = LibraryWriter.shared else { throw LibraryError.unavailable }
                         try await writer.deleteStickers(packID: pack.id, revision: pack.revision, ids: ids)
+                        await PackUpdateService.shared.didDeleteStickers(packID: pack.id, telegramName: pack.telegramName)
                         ImportActivity.shared.libraryChangeID += 1
-                        selectedStickers.removeAll()
+                        SelectionControls.update { resetSelection() }
+                        deletionIDs.removeAll()
                     } catch { status = error.localizedDescription }
                 }
             }
+            .foregroundStyle(.red)
         }
         .sheet(item: $sharedPNG) { PNGShareSheet(data: $0.data, type: $0.type).presentationDetents([.medium, .large]) }
         .task(id: pack.id + "." + pack.revision) {
             let bytes = await loadStorageBytes()
             guard !Task.isCancelled else { return }
-            storageBytes = bytes
+            storageBytes = bytes?.total
+            stickerStorageBytes = bytes?.stickers ?? [:]
         }
     }
 
-    private func loadStorageBytes() async -> Int64? {
+    private func loadStorageBytes() async -> (total: Int64, stickers: [String: Int64])? {
             let pack = pack
-            return await Task.detached(priority: .utility) { () -> Int64? in
+            return await Task.detached(priority: .utility) { () -> (total: Int64, stickers: [String: Int64])? in
                 guard let reader = try? LibraryReader.shared() else { return nil }
                 var paths = Set<String>()
                 for record in pack.stickers {
@@ -290,13 +325,19 @@ struct InstalledPackView: View {
                 paths.insert("packs/\(pack.id)/\(pack.revision)/manifest.json")
                 var checkedDirectories = Set<String>()
                 var total: Int64 = 0
+                var sizes: [String: Int64] = [:]
                 for path in paths {
                     guard let url = try? reader.file(path, checkedDirectories: &checkedDirectories),
                           let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
                           values.isRegularFile == true, let size = values.fileSize else { continue }
                     total += Int64(size)
+                    sizes[path] = Int64(size)
                 }
-                return total
+                let stickerSizes = Dictionary(uniqueKeysWithValues: pack.stickers.map { record in
+                    let paths = Set([record.pngPath, record.thumbnailPath, record.animationPath, record.playbackPath].compactMap { $0 })
+                    return (record.id, paths.reduce(Int64(0)) { $0 + (sizes[$1] ?? 0) })
+                })
+                return (total, stickerSizes)
             }.value
     }
 
@@ -315,6 +356,7 @@ struct InstalledPackView: View {
                             .accessibilityIdentifier("updatePack")
                     }
                     Button {
+                        selectionOptimizationPending = selecting
                         optimize(selecting ? selectedStickers : [])
                     } label: {
                         let title = selecting ? "선택한 \(selectedStickers.count)개 용량 최적화" : "용량 최적화"
@@ -323,14 +365,19 @@ struct InstalledPackView: View {
                     .disabled(ImportActivity.shared.count > 0 || (selecting && selectedStickers.isEmpty))
                     .accessibilityIdentifier("optimizePack")
                     if selecting {
-                        Button("선택한 스티커 삭제", systemImage: "trash", role: .destructive) { confirmStickerDelete = true }
+                        Button("선택한 스티커 삭제", systemImage: "trash", role: .destructive) { deletionIDs = selectedStickers; confirmStickerDelete = true }
+                        .foregroundStyle(.red)
                             .disabled(selectedStickers.isEmpty || ImportActivity.shared.count > 0)
                     } else {
                         Button("팩 삭제", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                        .foregroundStyle(.red)
                             .disabled(ImportActivity.shared.count > 0)
                     }
                 } label: { Label("옵션", systemImage: "ellipsis") }
                     .labelStyle(.iconOnly).accessibilityIdentifier("packOptions")
+                    .confirmationDialog(LibrarySyncService.shared.enabled && LibraryChangeJournal.cloudKitConfigured ? "모든 기기에서 이 팩을 삭제할까요?" : "이 팩을 삭제할까요?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                        Button("팩 삭제", role: .destructive) { Task { await delete(); dismiss() } }
+                    }
     }
 
     private func copy(_ sticker: Sticker, asPNG: Bool = false) {
@@ -338,9 +385,11 @@ struct InstalledPackView: View {
         permissionWarning = KeyboardAccessReceipt.lastAllowed == nil
         #endif
         let result = StickerCopyService().copy(sticker, isAllowed: true, asPNG: asPNG)
-        if result == .copied { copiedID = sticker.id }
-        status = result.message
-        UIAccessibility.post(notification: .announcement, argument: status)
+        if result == .copied {
+            copyGenerations[sticker.id, default: 0] += 1
+            status = "두 손가락으로 확대하거나 축소할 수 있어요."
+        } else { status = result.message }
+        UIAccessibility.post(notification: .announcement, argument: result.message)
     }
 
     private func share(_ sticker: Sticker, animated: Bool) {
@@ -352,6 +401,7 @@ struct InstalledPackView: View {
         } catch { status = "이미지를 공유할 수 없어요. 팩을 다시 확인해 주세요." }
     }
     private func resetSelection() {
+        selectionOptimizationPending = false
         selectionGestureGeneration += 1
         selecting = false
         selectedStickers.removeAll()
@@ -359,6 +409,44 @@ struct InstalledPackView: View {
         confirmStickerDelete = false
     }
 
+}
+
+/// A local, finite acknowledgement; repeated copies of the same sticker restart it.
+private struct StickerCopyFeedback: ViewModifier {
+    let generation: Int
+    let reduceMotion: Bool
+    private struct Frame {
+        var scale: CGFloat = 1
+        var badgeOpacity: Double = 0
+    }
+
+    func body(content: Content) -> some View {
+        content.keyframeAnimator(initialValue: Frame(), trigger: generation) { preview, frame in
+            preview
+                .scaleEffect(reduceMotion ? 1 : frame.scale)
+                .overlay {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .padding(9)
+                        .glassEffect(.regular, in: Circle())
+                        .opacity(frame.badgeOpacity)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+        } keyframes: { _ in
+            KeyframeTrack(\.scale) {
+                CubicKeyframe(0.9, duration: 0.1)
+                CubicKeyframe(1.05, duration: 0.16)
+                CubicKeyframe(1, duration: 0.16)
+            }
+            KeyframeTrack(\.badgeOpacity) {
+                LinearKeyframe(1, duration: 0.08)
+                LinearKeyframe(1, duration: 0.28)
+                LinearKeyframe(0, duration: 0.2)
+            }
+        }
+    }
 }
 
 /// Visibility changes stay local to each cell instead of invalidating the whole pack.

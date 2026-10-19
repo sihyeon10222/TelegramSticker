@@ -87,33 +87,15 @@ actor ImportJobCache {
         }
     }
 
-    func prepareOptimization(root: URL, writer: LibraryWriter, packIDs: Set<String>?, stickerIDs: Set<String>?, profile: StorageOptimizationProfile,
-                             progress: @escaping @Sendable (Int, Int) -> Void) async throws -> PreparedOptimization {
+    func optimize(root: URL, writer: LibraryWriter, packIDs: Set<String>? = nil, stickerIDs: Set<String>? = nil, profile: StorageOptimizationProfile = .compact, progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) async throws -> StorageOptimizationResult {
         let key = root.standardizedFileURL.path
         guard !activeRoots.contains(key) else { throw StickerImportError.importInProgress }
         activeRoots.insert(key)
         defer { activeRoots.remove(key) }
-        return try await writer.prepareOptimization(packIDs: packIDs, stickerIDs: stickerIDs, profile: profile, progress: progress)
-    }
-    func applyOptimization(root: URL, writer: LibraryWriter, draft: PreparedOptimization,
-                           progress: @escaping @Sendable (Int, Int) -> Void) async throws -> StorageOptimizationResult {
-        let key = root.standardizedFileURL.path
-        guard !activeRoots.contains(key) else { throw StickerImportError.importInProgress }
-        activeRoots.insert(key)
-        defer { activeRoots.remove(key) }
-        var result = try await writer.applyOptimization(draft, progress: progress)
-        // Keep the import lease until cleanup, including comparison files, finishes.
+        var result = try await writer.optimizeStorage(packIDs: packIDs, stickerIDs: stickerIDs, profile: profile, progress: progress)
         do { try await clearLeased(root: root, writer: writer, preserving: []) }
         catch { result.failures.append("용량 최적화는 반영했지만 일부 캐시 정리에 실패했어요: " + error.localizedDescription) }
         return result
-    }
-
-    func optimize(root: URL, writer: LibraryWriter, packIDs: Set<String>? = nil, stickerIDs: Set<String>? = nil, profile: StorageOptimizationProfile = .balanced, progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) async throws -> StorageOptimizationResult {
-        let key = root.standardizedFileURL.path
-        guard !activeRoots.contains(key) else { throw StickerImportError.importInProgress }
-        activeRoots.insert(key)
-        defer { activeRoots.remove(key) }
-        return try await writer.optimizeStorage(packIDs: packIDs, stickerIDs: stickerIDs, profile: profile, progress: progress)
     }
 
     func end(root: URL) { activeRoots.remove(root.standardizedFileURL.path) }

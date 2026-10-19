@@ -8,6 +8,7 @@ struct PackUpdatesRequest: Identifiable {
 
 struct PackUpdatesView: View {
     let request: PackUpdatesRequest
+    var onCheckCompleted: () -> Void = {}
     @State private var packs: [PackManifestV1] = []
     @State private var client: WorkerClient?
     @State private var applying: ImportModel?
@@ -60,9 +61,13 @@ struct PackUpdatesView: View {
                 do { if let configuration = try ImportSettings.load() { client = WorkerClient(configuration: configuration) } }
                 catch { self.error = error.localizedDescription }
                 await reload()
-                if request.checkOnOpen { await service.check(packs: packs) }
+                if request.checkOnOpen {
+                    await service.check(packs: packs)
+                    onCheckCompleted()
+                }
             }
         }.appModalBackground()
+        .workNotificationScreen("packUpdates")
     }
 
     private func packCard(_ entry: PackUpdateEntry) -> some View {

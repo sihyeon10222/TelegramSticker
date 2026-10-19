@@ -1,24 +1,19 @@
 import SwiftUI
 import UIKit
-import UniformTypeIdentifiers
 
 @MainActor @Observable
 final class OptimizationSession: Identifiable {
     let id = UUID()
     let request: OptimizationRequest
-    var profile = StorageOptimizationProfile.compact
     var running = false
-    var applying = false
     var finished = false
     var message: String?
     var progress = 0.0
-    var zoom = 1.0
     var restoreImport: ImportModel?
     var sourceLinks: [String] = []
-    private var drafts: [StorageOptimizationProfile: PreparedOptimization] = [:]
     private var operation: Task<Void, Never>?
+    private var started = false
     private var progressGeneration = UUID()
-    var draft: PreparedOptimization? { drafts[profile] }
     private var jobs: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ImportJobs") }
     init(request: OptimizationRequest) {
         self.request = request
@@ -27,65 +22,28 @@ final class OptimizationSession: Identifiable {
                 .compactMap { $0.telegramName.map { "https://t.me/addstickers/" + $0 } }
         }
     }
-    func openPreparedProfile(_ rawValue: String) async -> Bool {
-        guard !running, !finished, let profile = StorageOptimizationProfile(rawValue: rawValue),
-              let draft = drafts[profile], let writer = LibraryWriter.shared,
-              FileManager.default.fileExists(atPath: draft.root.path) else { return false }
-        for original in draft.originals {
-            guard (try? await writer.hasRevision(id: original.id, revision: original.revision)) == true else { return false }
-        }
-        self.profile = profile
-        return true
-    }
-    func removeDrafts(deleteFiles: Bool = true) {
-        guard !running else { return }
-        let roots = drafts.values.map(\.root)
-        drafts.removeAll()
-        if deleteFiles { Self.discard(roots) }
-    }
-    func selectProfile() {
-        guard !running, !finished else { return }
-        message = nil
-        guard let cached = draft, let writer = LibraryWriter.shared else { return }
-        let selected = profile
-        Task {
-            for original in cached.originals {
-                if (try? await writer.hasRevision(id: original.id, revision: original.revision)) != true {
-                    // Only invalidate the stale profile, keeping the other cached result.
-                    if drafts[selected]?.root == cached.root {
-                        drafts.removeValue(forKey: selected)
-                        Self.discard([cached.root])
-                    }
-                    if profile == selected { message = "팩이 변경되어 이 비교 버전을 다시 만들어야 해요." }
-                    return
-                }
-            }
-        }
-    }
-    private static func discard(_ roots: [URL]) {
-        Task.detached(priority: .utility) {
-            for root in roots { try? FileManager.default.removeItem(at: root) }
-        }
-    }
     func cancel() { operation?.cancel() }
-    func start(apply: Bool) {
-        guard !running, ImportActivity.shared.count == 0 else { return }
-        if !apply, draft != nil { return }
-        guard !apply || draft != nil else { return }
-        let selectedProfile = profile
-        let selectedDraft = draft
-        running = true; applying = apply; progress = 0; message = nil
+    func start() {
+        guard !started, !running else { return }
+        guard ImportActivity.shared.count == 0 else {
+            message = "다른 작업이 끝나면 다시 시도해 주세요."
+            return
+        }
+        started = true
+        running = true; progress = 0; message = nil
         let generation = UUID(); progressGeneration = generation
         ImportActivity.shared.count += 1
         operation = Task {
-            await DownloadDiagnostics.shared.run(title: apply ? "용량 최적화 적용" : "용량 최적화 비교 준비") {
+            await DownloadDiagnostics.shared.run(title: "용량 최적화 적용") {
                 await GalleryPreviewStore.shared.cancelForForegroundWork()
-                let id = await BackgroundWork.shared.begin(kind: apply ? .optimizationApply : .optimizationPreparation, title: apply ? "스티커 용량 최적화 적용" : "스티커 용량 최적화 비교 준비") { self.cancel() }
+                let id = await BackgroundWork.shared.begin(kind: .optimizationApply, title: "스티커 용량 최적화") { self.cancel() }
                 var success = false
                 defer {
+                    progressGeneration = UUID()
                     running = false; ImportActivity.shared.count -= 1
+                    ImportActivity.shared.libraryChangeID += 1
                     BackgroundWork.shared.end(id: id, success: success, detail: message, cancelled: Task.isCancelled,
-                        notificationInfo: apply ? [:] : ["optimizationSession": self.id.uuidString, "optimizationProfile": selectedProfile.rawValue])
+                        notificationInfo: ["optimizationSession": self.id.uuidString])
                 }
                 do {
                     guard let writer = LibraryWriter.shared else { throw LibraryError.unavailable }
@@ -96,30 +54,20 @@ final class OptimizationSession: Identifiable {
                             BackgroundWork.shared.report(id: id, completed: Int64(done), total: Int64(max(1, total)), subtitle: "처리 \(done)/\(total) · \(Int(self.progress * 100))%")
                         }
                     }
-                    if apply, let selectedDraft {
-                        let result = try await ImportJobCache.shared.applyOptimization(root: jobs, writer: writer, draft: selectedDraft, progress: report)
-                        success = result.failures.isEmpty; finished = true; progress = success ? 1 : min(progress, 0.99)
-                        ImportActivity.shared.libraryChangeID += 1
-                        message = "\(result.optimizedPacks)개 팩 반영 · \(ByteCountFormatter.string(fromByteCount: result.saved, countStyle: .file)) 절약" + (result.failures.isEmpty ? "" : "\n" + result.failures.joined(separator: "\n"))
-                        // Final application also clears the comparison files from the cache.
-                        drafts.removeAll()
-                    } else {
-                        let prepared = try await ImportJobCache.shared.prepareOptimization(root: jobs, writer: writer,
-                            packIDs: request.packIDs, stickerIDs: request.stickerIDs, profile: selectedProfile, progress: report)
-                        drafts[selectedProfile] = prepared
-                        success = true; progress = 1
-                        if prepared.saved == 0 { message = "현재 품질에서는 더 줄일 용량이 없어요. 원본을 유지해요." }
-                    }
+                    let result = try await ImportJobCache.shared.optimize(root: jobs, writer: writer,
+                        packIDs: request.packIDs, stickerIDs: request.stickerIDs, progress: report)
+                    success = result.failures.isEmpty; finished = true
                     progressGeneration = UUID()
-                    if success { BackgroundWork.shared.report(id: id, completed: 1, total: 1, subtitle: apply ? "용량 최적화 적용 완료 · 100%" : "비교 준비 완료 · 100%", finalized: true) }
+                    progress = success ? 1 : min(progress, 0.99)
+                    message = "\(result.optimizedPacks)개 팩 반영 · \(ByteCountFormatter.string(fromByteCount: result.saved, countStyle: .file)) 절약" + (result.failures.isEmpty ? "" : "\n" + result.failures.joined(separator: "\n"))
+                    if success { BackgroundWork.shared.report(id: id, completed: 1, total: 1, subtitle: "용량 최적화 적용 완료 · 100%", finalized: true) }
                 } catch {
-                    progressGeneration = UUID()
+                    finished = true
                     message = error is CancellationError ? "중단했어요. 완료된 팩은 유지하고, 처리 중인 팩의 기존 파일은 보존해요." : error.localizedDescription
                 }
             }
         }
     }
-    func newComparison() { removeDrafts(); finished = false; message = nil; progress = 0 }
     func restoreOriginals() {
         guard !running, ImportActivity.shared.count == 0, !sourceLinks.isEmpty, let writer = LibraryWriter.shared else { return }
         operation = Task {
