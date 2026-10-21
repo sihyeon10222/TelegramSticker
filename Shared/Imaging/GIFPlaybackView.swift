@@ -72,7 +72,11 @@ final class GIFPlaybackView: UIImageView {
     private var generation = UUID()
     private var pixels = 96
     private var repeatForever = false
-    var playbackPaused = false
+    var playbackPaused = false {
+        didSet {
+            if oldValue, !playbackPaused { tick(CACurrentMediaTime()) }
+        }
+    }
     func configure(url: URL?, poster: UIImage?, pixels: Int = 96, repeatForever: Bool = false) {
         self.repeatForever = repeatForever
         // willDisplay can run again for an unchanged cell during host transitions.
@@ -88,7 +92,10 @@ final class GIFPlaybackView: UIImageView {
             let timeline = await GIFFrameDecoder.shared.timeline(url)
             guard let self, !Task.isCancelled, self.generation == generation else { return }
             self.timeline = timeline; self.task = nil
-            if self.window != nil { GIFPlaybackClock.shared.add(self) }
+            if self.window != nil {
+                GIFPlaybackClock.shared.add(self)
+                self.tick(CACurrentMediaTime())
+            }
         }
     }
     func setPoster(_ poster: UIImage?) { if shown < 0, image == nil { image = poster } }
@@ -99,7 +106,16 @@ final class GIFPlaybackView: UIImageView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil { GIFPlaybackClock.shared.remove(self) }
-        else if timeline != nil { GIFPlaybackClock.shared.add(self) }
+        else if timeline != nil {
+            GIFPlaybackClock.shared.add(self)
+            tick(CACurrentMediaTime())
+        }
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Initial bounds can be empty when decoding finishes. Layout is sufficient
+        // to start the first visible frame; no scroll/visibility callback is needed.
+        if shown < 0 { tick(CACurrentMediaTime()) }
     }
     /// Test visibility through every clipping ancestor, including the paging viewport.
     /// A cell can still have a window while its page is hidden or translated offscreen.

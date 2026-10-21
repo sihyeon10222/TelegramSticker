@@ -84,6 +84,7 @@ extension KeyboardViewController {
         } else {
             applySelection()
         }
+        applyPendingLibraryIfPossible()
     }
 
     func clearHistoryAction() -> UIAction {

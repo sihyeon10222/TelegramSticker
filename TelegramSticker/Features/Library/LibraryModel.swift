@@ -4,14 +4,16 @@ import UniformTypeIdentifiers
 
 @MainActor @Observable
 final class LibraryModel {
-    @ObservationIgnored private var stickerCache: [String: [Sticker]] = [:]
-    @ObservationIgnored private var refreshGeneration = 0
-    @ObservationIgnored private var coverCache: [String: Sticker] = [:]
+    @ObservationIgnored private var contents: LibraryContents?
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshRequested = false
+    private static var cachedContents: LibraryContents?
     var packs: [PackManifestV1] = []
     var damagedPacks: [PackReference] = []
     var message: String?
     var isBusy = false
     var isAvailable = false
+    private(set) var isLoading = true
     private(set) var reader: LibraryReader?
     private(set) var writer: LibraryWriter?
 
@@ -21,37 +23,50 @@ final class LibraryModel {
             self.reader = reader
             writer = initialWriter ?? (initialReader == nil ? LibraryWriter.shared : nil)
             isAvailable = true
-            // Published manifests are ready to display; maintenance must not gate the first frame.
-            let snapshot = try reader.snapshot(resolvingFiles: false)
-            packs = snapshot.packs
-            PackUpdateService.shared.reconcile(packs: packs)
-            let available = Set(snapshot.packs.map(\.id))
-            damagedPacks = try reader.index().packs.filter { !available.contains($0.id) }
-            message = snapshot.warnings.first
-        } catch { message = error.localizedDescription }
+            if let cached = Self.cachedContents, cached.reader.root == reader.root { apply(cached) }
+        } catch { message = error.localizedDescription; isLoading = false }
     }
 
     func refresh() async {
         guard let reader else { return }
-        refreshGeneration += 1
-        let generation = refreshGeneration
-        do {
-            let (snapshot, references) = try await Task.detached { (try reader.snapshot(resolvingFiles: false), try reader.index().packs) }.value
-            guard !Task.isCancelled, generation == refreshGeneration else { return }
-            packs = snapshot.packs
-            PackUpdateService.shared.reconcile(packs: packs)
-            let revisions = Set(packs.map { $0.id + "." + $0.revision })
-            stickerCache = stickerCache.filter { revisions.contains($0.key) }
-            coverCache = coverCache.filter { revisions.contains($0.key) }
-            damagedPacks = references.filter { reference in !snapshot.packs.contains { $0.id == reference.id } }
-            message = snapshot.warnings.first
-        } catch {
-            guard !Task.isCancelled, generation == refreshGeneration else { return }
-            message = error.localizedDescription
+        refreshRequested = true
+        if let refreshTask { await refreshTask.value; return }
+        let task = Task {
+            defer { refreshTask = nil; isLoading = false }
+            repeat {
+                refreshRequested = false
+                do {
+                    let value = try await LibrarySnapshotLoader.shared.load(reader: reader)
+                    // A publication during this read requires a new index check before presentation.
+                    if !refreshRequested { apply(value) }
+                } catch {
+                    if !refreshRequested { message = error.localizedDescription }
+                }
+            } while refreshRequested
         }
+        refreshTask = task
+        await task.value
+    }
+
+    private func apply(_ value: LibraryContents) {
+        let snapshot = value.snapshot
+        let unchanged = contents?.snapshot.revision == snapshot.revision
+            && contents?.snapshot.cacheGeneration == snapshot.cacheGeneration
+            && contents?.snapshot.warnings == snapshot.warnings
+            && packs.map(\.id) == snapshot.packs.map(\.id)
+        contents = value
+        Self.cachedContents = value
+        isLoading = false
+        message = snapshot.warnings.first
+        guard !unchanged else { return }
+        packs = snapshot.packs
+        PackUpdateService.shared.reconcile(packs: packs)
+        let available = Set(snapshot.packs.map(\.id))
+        damagedPacks = snapshot.references.filter { !available.contains($0.id) }
     }
 
     func start() async {
+        await refresh()
         if let writer {
             do { try await writer.recover() } catch { message = error.localizedDescription }
         }
@@ -92,28 +107,10 @@ final class LibraryModel {
     }
 
     func stickers(in pack: PackManifestV1) -> [Sticker] {
-        let key = pack.id + "." + pack.revision
-        if let cached = stickerCache[key] { return cached }
-        guard let reader else { return [] }
-        let result: [Sticker] = pack.stickers.compactMap { record in
-            guard let png = try? reader.file(record.pngPath),
-                  let thumbnail = try? reader.file(record.thumbnailPath) else { return nil }
-            return Sticker(id: "\(pack.id).\(record.id)", name: record.name, detail: pack.title,
-                                 imageURL: png, thumbnailURL: thumbnail,
-                                 animationURL: record.animationPath.flatMap { try? reader.file($0) })
-        }
-        stickerCache[key] = result
-        return result
+        contents?.stickers[pack.id] ?? []
     }
 
     func cover(in pack: PackManifestV1) -> Sticker? {
-        let key = pack.id + "." + pack.revision
-        if let cached = coverCache[key] { return cached }
-        guard let reader, let record = pack.stickers.first,
-              let url = try? reader.file(record.thumbnailPath) else { return nil }
-        let cover = Sticker(id: key, name: pack.title, detail: "", thumbnailURL: url,
-                            animationURL: (record.playbackPath ?? record.animationPath).flatMap { try? reader.file($0) })
-        coverCache[key] = cover
-        return cover
+        contents?.covers[pack.id]
     }
 }

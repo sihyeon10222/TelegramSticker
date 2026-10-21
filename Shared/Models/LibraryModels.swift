@@ -54,4 +54,42 @@ nonisolated struct LibrarySnapshot: Sendable {
     let warnings: [String]
     var cacheGeneration: String? = nil
     var files: [String: URL] = [:]
+    var references: [PackReference] = []
+}
+
+/// Validated file descriptors, prepared away from UIKit/SwiftUI presentation.
+nonisolated struct LibraryContents: Sendable {
+    let reader: LibraryReader
+    let snapshot: LibrarySnapshot
+    let stickers: [String: [Sticker]]
+    let byStickerID: [String: Sticker]
+    let stickerIDs: Set<String>
+    let covers: [String: Sticker]
+
+    init(reader: LibraryReader, snapshot: LibrarySnapshot) {
+        self.reader = reader
+        self.snapshot = snapshot
+        var stickers: [String: [Sticker]] = [:]
+        var byID: [String: Sticker] = [:]
+        var covers: [String: Sticker] = [:]
+        for pack in snapshot.packs {
+            let items = pack.stickers.compactMap { record -> Sticker? in
+                guard let png = snapshot.files[record.pngPath], let thumbnail = snapshot.files[record.thumbnailPath] else { return nil }
+                return Sticker(id: pack.id + "." + record.id, name: record.name, detail: pack.title,
+                    imageURL: png, thumbnailURL: thumbnail,
+                    animationURL: record.animationPath.flatMap { snapshot.files[$0] },
+                    playbackURL: record.playbackPath.flatMap { snapshot.files[$0] })
+            }
+            stickers[pack.id] = items
+            for item in items { byID[item.id] = item }
+            if let first = items.first {
+                covers[pack.id] = Sticker(id: pack.id + "." + pack.revision, name: pack.title, detail: "",
+                    thumbnailURL: first.thumbnailURL, animationURL: first.playbackURL ?? first.animationURL)
+            }
+        }
+        self.stickers = stickers
+        byStickerID = byID
+        stickerIDs = Set(byID.keys)
+        self.covers = covers
+    }
 }

@@ -45,7 +45,3 @@ struct KeyboardSetupAction: View {
         }
     }
 }
-
-struct KeyboardPermissionNotice: View {
-    var body: some View { KeyboardSetupAction(kind: .fullAccess) }
-}

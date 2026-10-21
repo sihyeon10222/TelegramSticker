@@ -57,18 +57,6 @@ struct AppModalCloseToolbar: ToolbarContent {
     }
 }
 
-struct AppGlassContainer<Content: View>: View {
-    let spacing: CGFloat
-    @ViewBuilder let content: () -> Content
-    var body: some View {
-        #if targetEnvironment(macCatalyst)
-        content()
-        #else
-        GlassEffectContainer(spacing: spacing, content: content)
-        #endif
-    }
-}
-
 private struct AppQuietGlassButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.controlSize) private var controlSize

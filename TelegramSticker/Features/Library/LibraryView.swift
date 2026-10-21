@@ -20,7 +20,6 @@ struct LibraryView: View {
     @State private var sharedSelectionFile: URL?
     @State private var sharingSelection = false
     @State private var optimizationRequest: OptimizationRequest?
-    @State private var sidebarScrolling = false
     @State private var confirmBulkDelete = false
     @State private var sharing = false
     @State private var sharingPack: PackManifestV1?
@@ -99,7 +98,7 @@ struct LibraryView: View {
             Group {
                 if let cover = model.cover(in: pack) {
                     StickerLargePreview(sticker: cover, pixels: 64,
-                        paused: sidebarScrolling || activeTab != .library || scenePhase != .active || reduceMotion)
+                        paused: activeTab != .library || scenePhase != .active || reduceMotion)
                         .padding(cover.animationURL == nil ? 6 : 3)
                 } else { Image(systemName: "square.stack").foregroundStyle(.secondary) }
             }
@@ -315,8 +314,13 @@ struct LibraryView: View {
                 }
                 if model.packs.isEmpty && SyncDownloadCoordinator.shared.pendingPacks.isEmpty {
                     Section {
-                        ContentUnavailableView("설치한 팩이 없어요", systemImage: "square.stack",
-                                               description: Text("+ 버튼에서 Telegram 스티커 팩 링크를 추가하세요."))
+                        if model.isLoading {
+                            ProgressView("스티커 팩을 불러오는 중")
+                                .frame(maxWidth: .infinity)
+                        } else if model.message == nil {
+                            ContentUnavailableView("설치한 팩이 없어요", systemImage: "square.stack",
+                                                   description: Text("+ 버튼에서 Telegram 스티커 팩 링크를 추가하세요."))
+                        }
                     }
                 }
                 if !model.damagedPacks.isEmpty {
@@ -375,10 +379,6 @@ struct LibraryView: View {
             }))
             #endif
             .listStyle(.insetGrouped)
-            .onScrollPhaseChange { _, phase in
-                let active = phase != .idle
-                if sidebarScrolling != active { sidebarScrolling = active }
-            }
             // Keep the hard edge clear at rest and during top overscroll.
             // Normalize by the inset so the threshold survives rotation.
             .scrollEdgeEffectStyle(wideLayout ? .hard : .automatic, for: .top)

@@ -13,12 +13,14 @@ nonisolated struct GalleryCachedCard: Sendable {
 }
 
 nonisolated enum GalleryDiskCache {
-    static func read(names: [String]) -> [GalleryCachedCard] {
+    static func read(names: [String]) async -> [GalleryCachedCard] {
         let fm = FileManager.default
         let root = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("GalleryPreviews/v1")
         // Resolve the installed library once for the whole batch, rather than per preview.
         let reader = try? LibraryReader.shared()
-        let library = try? reader?.snapshot(resolvingFiles: false)
+        let library: LibrarySnapshot?
+        if let reader { library = try? await LibrarySnapshotLoader.shared.load(reader: reader).snapshot }
+        else { library = nil }
         return names.compactMap { name in
             guard let pack = GalleryMetadataStore.savedPack(name: name) else { return nil }
             let installed = library?.packs.first { $0.telegramName == name }

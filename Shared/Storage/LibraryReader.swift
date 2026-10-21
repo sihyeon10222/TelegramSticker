@@ -88,10 +88,27 @@ nonisolated struct LibraryReader: Sendable {
     func snapshot(resolvingFiles: Bool = true) throws -> LibrarySnapshot {
         var checkedDirectories = Set<String>()
         let index = try index(checkedDirectories: &checkedDirectories)
+        return try snapshot(index: index, resolvingFiles: resolvingFiles, checkedDirectories: &checkedDirectories)
+    }
+
+    func contents(reusing cached: LibraryContents? = nil) throws -> LibraryContents {
+        try Task.checkCancellation()
+        var checkedDirectories = Set<String>()
+        let index = try index(checkedDirectories: &checkedDirectories)
+        if let cached, cached.reader.root == root, cached.snapshot.warnings.isEmpty,
+           cached.snapshot.revision == index.libraryRevision, cached.snapshot.cacheGeneration == index.cacheGeneration {
+            return cached
+        }
+        let snapshot = try snapshot(index: index, resolvingFiles: true, checkedDirectories: &checkedDirectories)
+        return LibraryContents(reader: self, snapshot: snapshot)
+    }
+
+    private func snapshot(index: LibraryIndexV1, resolvingFiles: Bool, checkedDirectories: inout Set<String>) throws -> LibrarySnapshot {
         var packs: [PackManifestV1] = []
         var warnings: [String] = []
         var files: [String: URL] = [:]
         for reference in index.packs {
+            try Task.checkCancellation()
             do {
                 let data = try boundedData(file(reference.manifestPath, checkedDirectories: &checkedDirectories), limit: 2 * 1_024 * 1_024)
                 let pack = try JSONDecoder().decode(PackManifestV1.self, from: data)
@@ -109,6 +126,7 @@ nonisolated struct LibraryReader: Sendable {
                           name.range(of: "^[a-z0-9_]{1,64}$", options: .regularExpression) != nil else { throw LibraryError.invalidIndex }
                 }
                 for sticker in pack.stickers {
+                    try Task.checkCancellation()
                     guard Self.safeID(sticker.id), sticker.format == "png",
                           sticker.pngPath.hasPrefix(prefix), sticker.thumbnailPath.hasPrefix(prefix) else {
                         throw LibraryError.unsafePath
@@ -131,11 +149,13 @@ nonisolated struct LibraryReader: Sendable {
                     }
                 }
                 packs.append(pack)
-            } catch {
+            } catch is CancellationError { throw CancellationError() }
+            catch {
                 warnings.append("일부 팩을 읽을 수 없어요. 메인 앱에서 해당 팩을 확인해 주세요.")
             }
         }
-        return LibrarySnapshot(revision: index.libraryRevision, packs: packs, warnings: warnings, cacheGeneration: index.cacheGeneration, files: files)
+        return LibrarySnapshot(revision: index.libraryRevision, packs: packs, warnings: warnings,
+            cacheGeneration: index.cacheGeneration, files: files, references: index.packs)
     }
 
     func boundedData(_ url: URL, limit: Int) throws -> Data {
@@ -146,5 +166,21 @@ nonisolated struct LibraryReader: Sendable {
         let data = try Data(contentsOf: url)
         guard data.count <= limit else { throw LibraryError.invalidIndex }
         return data
+    }
+}
+
+/// Each process keeps its own read-only cache. Filesystem validation never runs on MainActor.
+actor LibrarySnapshotLoader {
+    static let shared = LibrarySnapshotLoader()
+    private var cached: LibraryContents?
+
+    func loadShared(force: Bool = false) throws -> LibraryContents {
+        try load(reader: LibraryReader.shared(), force: force)
+    }
+
+    func load(reader: LibraryReader, force: Bool = false) throws -> LibraryContents {
+        let contents = try reader.contents(reusing: force ? nil : cached)
+        cached = contents
+        return contents
     }
 }

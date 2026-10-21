@@ -212,17 +212,60 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
         let registered = RegisterEventHotKey(UInt32(defaults.object(forKey: "mac.shortcutKeyCode") as? Int ?? kVK_ANSI_S), UInt32(defaults.object(forKey: "mac.shortcutModifiers") as? Int ?? (optionKey | shiftKey)), EventHotKeyID(signature: 0x53425354, id: 1), GetApplicationEventTarget(), 0, &hotKey)
         hotKeyError = installed == noErr && registered == noErr ? "" : "\(shortcutLabel) 단축키를 등록하지 못했어요. 다른 조합을 지정해 주세요."
     }
+    private var hasLoadedSnapshot = false
+    private var libraryStatus: String? = "스티커를 불러오는 중…"
+    private var pendingSnapshot: [NSDictionary]?
+    private var snapshotUpdate: Task<Void, Never>?
+    private var snapshotUpdateID = UUID()
+
+    func updateSnapshot(_ snapshot: [NSDictionary]) {
+        let changed = !hasLoadedSnapshot || !(snapshot as NSArray).isEqual(to: pickerSnapshot)
+        hasLoadedSnapshot = true
+        guard changed else { return }
+        if pickerSnapshot.first?["cacheGeneration"] as? String != snapshot.first?["cacheGeneration"] as? String {
+            PickerMediaButton.clearPosterCache()
+        }
+        pickerSnapshot = snapshot
+        libraryStatus = snapshot.isEmpty ? "설치한 스티커가 없어요. 앱에서 팩을 추가해 주세요." : nil
+        pendingSnapshot = snapshot
+        applySnapshotWhenIdle()
+    }
+
+    func setLibraryStatus(_ message: String?) {
+        libraryStatus = message ?? (hasLoadedSnapshot && pickerSnapshot.isEmpty
+            ? "설치한 스티커가 없어요. 앱에서 팩을 추가해 주세요." : nil)
+        pickerContent?.setLibraryStatus(libraryStatus)
+    }
+
+    private func applySnapshotWhenIdle() {
+        guard panel?.isVisible == true, snapshotUpdate == nil else { return }
+        let id = UUID(); snapshotUpdateID = id
+        snapshotUpdate = Task { [weak self] in
+            guard let self else { return }
+            defer { if self.snapshotUpdateID == id { self.snapshotUpdate = nil } }
+            while self.pickerContent?.isInteracting == true || self.panel?.inLiveResize == true {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                guard self.panel?.isVisible == true else { return }
+            }
+            guard let pending = self.pendingSnapshot else { return }
+            self.pendingSnapshot = nil
+            self.pickerContent?.replacePacks(pending.compactMap(PickerPack.init))
+            self.pickerContent?.setLibraryStatus(self.libraryStatus)
+        }
+    }
+
     func togglePicker() {
         if panel?.isVisible == true { dismiss(); return }
-        let published = snapshot?() ?? []
-        if panel == nil || !(published as NSArray).isEqual(to: pickerSnapshot) {
-            PickerMediaButton.clearPosterCache()
-            pickerContent = nil
-            panel = nil
-            pickerSnapshot = published
-            buildPicker(packs: published.compactMap(PickerPack.init))
+        _ = snapshot?() // Starts an asynchronous refresh while retaining the current page.
+        if panel == nil {
+            buildPicker(packs: pickerSnapshot.compactMap(PickerPack.init))
+            pendingSnapshot = nil
+        } else if let pending = pendingSnapshot {
+            pendingSnapshot = nil
+            pickerContent?.replacePacks(pending.compactMap(PickerPack.init))
         }
         guard let panel else { return }
+        pickerContent?.setLibraryStatus(libraryStatus)
         pickerContent?.resumePreviews()
         panel.contentView?.layoutSubtreeIfNeeded()
         panel.makeKeyAndOrderFront(nil)
@@ -230,18 +273,14 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
     }
 
     private func buildPicker(packs: [PickerPack]) {
-        let model = PickerModel(packs: packs, defaults: defaults)
-        let panel = PickerPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360), styleMask: [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel], backing: .buffered, defer: false)
+        let model = PickerModel(packs: packs, defaults: defaults, allowPruning: hasLoadedSnapshot)
+        // Keep the compact tab row inside the content hit-testing area, without an overlaid titlebar.
+        let panel = PickerPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360), styleMask: [.borderless, .resizable, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true; panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.isReleasedWhenClosed = false
         panel.title = "StickerBridge"
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
-        panel.standardWindowButton(.closeButton)?.isHidden = true
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.isMovableByWindowBackground = true
         panel.minSize = NSSize(width: 360, height: 260)
         panel.delegate = self
@@ -255,6 +294,7 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
         panel.onSettings = { [weak self] in self?.showManagement() }
         panel.onZoom = { [weak content] step in content?.zoom(by: step) }
         let glass = NSGlassEffectView(frame: panel.contentView!.bounds)
+        glass.style = .regular
         glass.cornerRadius = 24
         glass.contentView = content
         content.frame = glass.bounds; content.autoresizingMask = [.width, .height]
@@ -267,8 +307,12 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
     }
 
     private func installPickerMonitors() {
-        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in self?.dismiss() }) { monitors.append(monitor) }
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
+            guard self?.pickerContent?.isTrackingTabInteraction != true else { return }
+            self?.dismiss()
+        }) { monitors.append(monitor) }
         if let monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown], handler: { [weak self] event in
+            if self?.pickerContent?.isTrackingTabInteraction == true { return event }
             if event.type == .keyDown, event.window === self?.panel {
                 if self?.panel?.handleSettingsKey(event) == true || self?.panel?.handleZoomKey(event) == true { return nil }
             }
@@ -308,6 +352,8 @@ final class DesktopPlugin: NSObject, DesktopPluginProtocol, NSWindowDelegate {
     }
 
     private func dismiss() {
+        snapshotUpdateID = UUID()
+        snapshotUpdate?.cancel(); snapshotUpdate = nil
         savePickerFrame()
         pickerContent?.suspendPreviews()
         panel?.orderOut(nil)
@@ -344,9 +390,10 @@ private struct PickerSection {
 }
 @MainActor
 private final class PickerModel {
-    let packs: [PickerPack]
+    private(set) var packs: [PickerPack]
+    private(set) var libraryLoaded: Bool
     var selected: String = "all" { didSet { defaults.set(selected, forKey: "mac.lastPack") } }
-    var recent: [String]
+    private(set) var recent: [String]
     var message: String? { didSet { onMessage?(message) } }
     var onMessage: ((String?) -> Void)?
     private(set) var cellTarget: CGFloat = 72
@@ -358,17 +405,28 @@ private final class PickerModel {
     let defaults: UserDefaults
     var choices: [String] { ["all", "recent"] + packs.map(\.id) }
 
-    init(packs: [PickerPack], defaults: UserDefaults) {
-        self.packs = packs; self.defaults = defaults
+    init(packs: [PickerPack], defaults: UserDefaults, allowPruning: Bool = true) {
+        self.packs = packs; self.defaults = defaults; libraryLoaded = allowPruning
         let savedSize = defaults.double(forKey: "mac.pickerCellSize.v1")
         cellTarget = savedSize.isFinite && savedSize >= 36 && savedSize <= 144 ? savedSize : 72
         let available = Set(packs.flatMap(\.stickers).map(\.id))
         var seen = Set<String>()
-        recent = Array((defaults.stringArray(forKey: "mac.recentStickers") ?? []).filter { available.contains($0) && seen.insert($0).inserted }.prefix(24))
-        defaults.set(recent, forKey: "mac.recentStickers")
+        recent = Array((defaults.stringArray(forKey: "mac.recentStickers") ?? []).filter { (!allowPruning || available.contains($0)) && seen.insert($0).inserted }.prefix(24))
+        if allowPruning { defaults.set(recent, forKey: "mac.recentStickers") }
+        applyPackOrder(prune: allowPruning)
         let previous = defaults.string(forKey: "mac.lastPack") ?? "all"
-        selected = choices.contains(previous) ? previous : "all"
+        selected = !allowPruning || choices.contains(previous) ? previous : "all"
     }
+    func replacePacks(_ packs: [PickerPack]) {
+        self.packs = packs
+        libraryLoaded = true
+        applyPackOrder(prune: true)
+        let available = Set(packs.flatMap(\.stickers).map(\.id))
+        recent = recent.filter { available.contains($0) }
+        defaults.set(recent, forKey: "mac.recentStickers")
+        if !choices.contains(selected) { selected = "all" }
+    }
+
     func sections(for id: String) -> [PickerSection] {
         if id == "all" { return packs.map { PickerSection(title: $0.title, stickers: $0.stickers) } }
         if id == "recent" {
@@ -381,14 +439,41 @@ private final class PickerModel {
         recent.removeAll { $0 == id }; recent.insert(id, at: 0)
         defaults.set(Array(recent.prefix(24)), forKey: "mac.recentStickers")
     }
+    func clearRecent() {
+        recent = []
+        defaults.removeObject(forKey: "mac.recentStickers")
+        defaults.removeObject(forKey: "mac.pickerScroll.v1.recent")
+    }
+    @discardableResult
+    func movePack(_ id: String, to index: Int) -> Bool {
+        guard let from = packs.firstIndex(where: { $0.id == id }), packs.indices.contains(index) else { return false }
+        guard from != index else { return true }
+        let pack = packs.remove(at: from)
+        packs.insert(pack, at: index)
+        defaults.set(packs.map(\.id), forKey: "mac.pickerPackOrder.v1")
+        return true
+    }
+    private func applyPackOrder(prune: Bool) {
+        guard let saved = defaults.stringArray(forKey: "mac.pickerPackOrder.v1") else { return }
+        let ranks = Dictionary(saved.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: { min($0, $1) })
+        packs = packs.enumerated().sorted {
+            let lhs = ranks[$0.element.id] ?? Int.max, rhs = ranks[$1.element.id] ?? Int.max
+            return lhs == rhs ? $0.offset < $1.offset : lhs < rhs
+        }.map(\.element)
+        if prune { defaults.set(packs.map(\.id), forKey: "mac.pickerPackOrder.v1") }
+    }
+}
+
+private enum PickerLayout {
+    static let stickerSpacing: CGFloat = 2
 }
 
 /// AppKit-only UI: Catalyst's SwiftUI image cannot host macOS NSHostingView.
 @MainActor
-private final class PickerContentView: NSView {
+private final class PickerContentView: NSView, NSMenuDelegate {
     private let model: PickerModel
     private let copy: (String) -> Void
-    private let tabs = NSStackView()
+    private let tabs = PickerPackTabStrip(frame: .zero)
     private let tabScroll = NSScrollView()
     private let viewport = PickerViewport()
     private let gestures = PickerSwipeHandler()
@@ -407,11 +492,23 @@ private final class PickerContentView: NSView {
     private var pinching = false
     private var pinchStart: CGFloat = 72
     private var pinchScale: CGFloat = 1
+    private var reorderingPacks = false
+    private var packOrderChanged = false
+    private var trackingRecentMenu = false
 
     init(model: PickerModel, copy: @escaping (String) -> Void) {
         self.model = model; self.copy = copy
         super.init(frame: NSRect(x: 0, y: 0, width: 520, height: 360))
         tabs.orientation = .horizontal; tabs.spacing = 6
+        tabs.onBeginDrag = { [weak self] in self?.beginPackReordering() }
+        tabs.onEndDrag = { [weak self] in self?.endPackReordering() }
+        tabs.onMovePack = { [weak self] id, index in
+            guard let self else { return false }
+            let previous = self.model.packs.map(\.id)
+            guard self.model.movePack(id, to: index) else { return false }
+            self.packOrderChanged = previous != self.model.packs.map(\.id)
+            return true
+        }
         tabScroll.drawsBackground = false; tabScroll.hasHorizontalScroller = false
         tabScroll.documentView = tabs
         tabs.translatesAutoresizingMaskIntoConstraints = false
@@ -422,10 +519,10 @@ private final class PickerContentView: NSView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 16),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PickerLayout.stickerSpacing),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -PickerLayout.stickerSpacing),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: PickerLayout.stickerSpacing),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -PickerLayout.stickerSpacing),
             tabScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             tabScroll.heightAnchor.constraint(equalToConstant: 40),
             tabs.heightAnchor.constraint(equalTo: tabScroll.contentView.heightAnchor),
@@ -465,6 +562,7 @@ private final class PickerContentView: NSView {
             incoming?.removeFromSuperview(); incoming = nil; incomingID = nil
             dragging = false; settling = false
             current.frame = viewport.bounds
+            current.setZooming(pinching)
         }
         if !dragging && !settling { current.frame = viewport.bounds }
         current.layoutSubtreeIfNeeded()
@@ -475,6 +573,74 @@ private final class PickerContentView: NSView {
             revealSelectedTab(); needsRevealTab = false
         }
     }
+    var isTrackingTabInteraction: Bool { reorderingPacks || trackingRecentMenu }
+    var isInteracting: Bool { dragging || settling || pinching || isTrackingTabInteraction }
+
+    private func beginPackReordering() {
+        interruptSettlement()
+        reorderingPacks = true; packOrderChanged = false
+        needsRevealTab = false
+        current.setZooming(true)
+        tabs.arrangedSubviews.forEach { ($0 as? PickerMediaButton)?.setPlaybackSuspended(true) }
+    }
+    private func endPackReordering() {
+        let tabOrigin = tabScroll.contentView.bounds.origin
+        reorderingPacks = false
+        if packOrderChanged {
+            packOrderChanged = false
+            for view in tabs.arrangedSubviews { tabs.removeArrangedSubview(view); view.removeFromSuperview() }
+            buildTabs()
+            if model.selected == "all" { reloadCurrentPage() }
+        }
+        if window?.isVisible == true {
+            resumePreviews()
+            needsRevealTab = false
+            tabs.layoutSubtreeIfNeeded()
+            tabScroll.contentView.scroll(to: tabOrigin)
+            tabScroll.reflectScrolledClipView(tabScroll.contentView)
+        }
+    }
+    private func reloadCurrentPage() {
+        current.stopPreviews(); current.removeFromSuperview()
+        current = makePage(id: model.selected)
+        viewport.addSubview(current)
+        needsLayout = true
+    }
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.items.first?.isEnabled = !model.recent.isEmpty
+    }
+    func menuWillOpen(_ menu: NSMenu) {
+        trackingRecentMenu = true
+        interruptSettlement()
+    }
+    func menuDidClose(_ menu: NSMenu) { trackingRecentMenu = false }
+    @objc private func clearRecentStickers(_ sender: NSMenuItem) {
+        interruptSettlement()
+        let showingRecent = model.selected == "recent"
+        if showingRecent { current.stopPreviews(); current.removeFromSuperview() }
+        model.clearRecent()
+        if showingRecent {
+            current = makePage(id: "recent")
+            viewport.addSubview(current)
+            needsLayout = true
+        }
+    }
+
+    func setLibraryStatus(_ text: String?) { model.message = text }
+
+    func replacePacks(_ packs: [PickerPack]) {
+        interruptSettlement()
+        current.stopPreviews()
+        current.removeFromSuperview()
+        incoming?.stopPreviews(); incoming?.removeFromSuperview(); incoming = nil; incomingID = nil
+        model.replacePacks(packs)
+        for view in tabs.arrangedSubviews { tabs.removeArrangedSubview(view); view.removeFromSuperview() }
+        current = makePage(id: model.selected)
+        viewport.addSubview(current)
+        buildTabs()
+        resumePreviews()
+    }
+
     func suspendPreviews() {
         interruptSettlement()
         current.saveScrollPosition()
@@ -524,14 +690,16 @@ private final class PickerContentView: NSView {
         incoming?.setCellTarget(model.cellTarget)
     }
     private func makePage(id: String) -> PickerPageView {
-        let page = PickerPageView(sections: model.sections(for: id), emptyMessage: id == "recent"
-                                  ? "최근 사용한 스티커가 없어요. 전체에서 스티커를 복사해 보세요."
-                                  : "앱에서 스티커 팩을 추가해 주세요.", copy: copy)
+        let emptyMessage = !model.libraryLoaded ? "" : id == "recent"
+            ? "최근 사용한 스티커가 없어요. 전체에서 스티커를 복사해 보세요."
+            : "앱에서 스티커 팩을 추가해 주세요."
+        let page = PickerPageView(sections: model.sections(for: id), emptyMessage: emptyMessage, copy: copy)
         page.setCellTarget(model.cellTarget)
         page.frame = viewport.bounds
         page.pendingScrollOffset = model.defaults.double(forKey: "mac.pickerScroll.v1." + id)
         page.onScrollPosition = { [weak model] offset in
-            model?.defaults.set(Double(offset), forKey: "mac.pickerScroll.v1." + id)
+            guard let model, model.libraryLoaded else { return }
+            model.defaults.set(Double(offset), forKey: "mac.pickerScroll.v1." + id)
         }
         page.onMagnifyEvent = { [weak self] event in self?.magnify(with: event) }
         page.onScrollEvent = { [weak self] event in self?.gestures.scrollWheel(with: event) }
@@ -544,7 +712,7 @@ private final class PickerContentView: NSView {
               model.choices.indices.contains(index + step) else { return }
         selectPack(id: model.choices[index + step])
     }
-    private func prepareIncoming(step: Int) -> Bool {
+    private func prepareIncoming(step: Int, suspendPlayback: Bool = false) -> Bool {
         guard let index = model.choices.firstIndex(of: model.selected),
               model.choices.indices.contains(index + step) else { return false }
         let id = model.choices[index + step]
@@ -552,6 +720,7 @@ private final class PickerContentView: NSView {
             incoming?.removeFromSuperview()
             incoming = makePage(id: id); incomingID = id; incomingStep = step
             if let incoming {
+                incoming.setZooming(suspendPlayback)
                 incoming.frame.origin.x = CGFloat(step) * viewport.bounds.width
                 viewport.addSubview(incoming)
                 incoming.layoutSubtreeIfNeeded(); incoming.updatePreviews()
@@ -596,16 +765,34 @@ private final class PickerContentView: NSView {
         if commit, prepareIncoming(step: step) { settle(commit: true, velocity: velocity) }
         else { settle(commit: false, velocity: velocity) }
     }
-    private func selectPack(id: String) {
+    private func selectPack(id: String, viaTab: Bool = false) {
         interruptSettlement()
         guard id != model.selected,
               let old = model.choices.firstIndex(of: model.selected), let new = model.choices.firstIndex(of: id) else { return }
+        let distance = abs(new - old)
+        if viaTab, distance > 1, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            // Traverse each intervening pack without a spring stop at every page.
+            let duration = max(0.024, min(0.07, 0.42 / Double(distance - 1)))
+            advanceTabSelection(to: id, duration: duration)
+            return
+        }
         incoming?.removeFromSuperview()
         incoming = makePage(id: id); incomingID = id; incomingStep = new > old ? 1 : -1
         incoming!.frame.origin.x = CGFloat(incomingStep) * viewport.bounds.width
         viewport.addSubview(incoming!)
         incoming!.layoutSubtreeIfNeeded(); incoming!.updatePreviews()
-        settle(commit: true)
+        settle(commit: true, duration: viaTab ? 0.18 : nil)
+    }
+    private func advanceTabSelection(to id: String, duration: TimeInterval) {
+        guard let old = model.choices.firstIndex(of: model.selected),
+              let new = model.choices.firstIndex(of: id), old != new,
+              prepareIncoming(step: new > old ? 1 : -1, suspendPlayback: true) else { return }
+        current.setZooming(true)
+        incoming?.setZooming(true)
+        let last = abs(new - old) == 1
+        settle(commit: true, duration: last ? 0.14 : duration, continuation: last ? nil : { [weak self] in
+            self?.advanceTabSelection(to: id, duration: duration)
+        })
     }
     private func interruptSettlement() {
         guard settling else { return }
@@ -624,9 +811,10 @@ private final class PickerContentView: NSView {
             current.animator().setFrameOrigin(.zero)
         }
         current.frame = viewport.bounds
+        current.setZooming(false)
         settling = false; dragging = false
     }
-    private func settle(commit: Bool, velocity: CGFloat = 0) {
+    private func settle(commit: Bool, velocity: CGFloat = 0, duration: TimeInterval? = nil, continuation: (() -> Void)? = nil) {
         settlementCommits = commit
         settling = true
         transitionToken += 1
@@ -643,19 +831,28 @@ private final class PickerContentView: NSView {
             } else { self.incoming?.stopPreviews(); self.incoming?.removeFromSuperview() }
             self.incoming = nil; self.incomingID = nil
             self.current.frame = self.viewport.bounds
+            if continuation == nil { self.current.setZooming(false) }
             self.current.updatePreviews()
             self.settling = false; self.dragging = false
+            continuation?()
         }
         if reduced { finish(); return }
-        // Both pages share a critically damped spring and the measured release
-        // velocity. Their gap stays fixed throughout the transition.
+        // Clicks pass intermediate pages at constant speed; swipes retain their release spring.
         let destination = commit ? -CGFloat(incomingStep) * width : 0
         let start = current.frame.origin.x
-        let spring = CASpringAnimation(keyPath: "position.x")
-        spring.mass = 1; spring.stiffness = 300; spring.damping = 34
-        let remaining = destination - start
-        spring.initialVelocity = abs(remaining) > 1 ? max(-20, min(20, velocity / remaining)) : 0
-        spring.duration = spring.settlingDuration
+        let animation: CABasicAnimation
+        if let duration {
+            animation = CABasicAnimation(keyPath: "position.x")
+            animation.duration = duration
+            animation.timingFunction = CAMediaTimingFunction(name: continuation == nil ? .easeOut : .linear)
+        } else {
+            let spring = CASpringAnimation(keyPath: "position.x")
+            spring.mass = 1; spring.stiffness = 300; spring.damping = 34
+            let remaining = destination - start
+            spring.initialVelocity = abs(remaining) > 1 ? max(-20, min(20, velocity / remaining)) : 0
+            spring.duration = spring.settlingDuration
+            animation = spring
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         let currentPosition = current.layer?.position.x ?? 0
@@ -663,16 +860,16 @@ private final class PickerContentView: NSView {
         current.setFrameOrigin(NSPoint(x: destination, y: 0))
         incoming?.setFrameOrigin(NSPoint(x: destination + CGFloat(incomingStep) * width, y: 0))
         CATransaction.commit()
-        spring.fromValue = currentPosition
-        spring.toValue = currentPosition + destination - start
-        current.layer?.add(spring, forKey: "pageSpring")
+        animation.fromValue = currentPosition
+        animation.toValue = currentPosition + destination - start
+        current.layer?.add(animation, forKey: "pageSpring")
         if let incoming {
-            let next = spring.copy() as! CASpringAnimation
+            let next = animation.copy() as! CABasicAnimation
             next.fromValue = incomingPosition
             next.toValue = incomingPosition + destination - start
             incoming.layer?.add(next, forKey: "pageSpring")
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + spring.duration) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + animation.duration) {
             MainActor.assumeIsolated { finish() }
         }
     }
@@ -680,9 +877,19 @@ private final class PickerContentView: NSView {
         for (id, label, symbol) in [("all", "전체", "square.grid.2x2"), ("recent", "최근 사용", "clock")] {
             let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: label)!, target: self, action: #selector(selectTab(_:)))
             configureTab(button, id: id, label: label)
+            if id == "recent" {
+                let menu = NSMenu()
+                menu.autoenablesItems = false; menu.delegate = self
+                let clear = NSMenuItem(title: "최근 사용 내역 지우기", action: #selector(clearRecentStickers(_:)), keyEquivalent: "")
+                clear.target = self
+                clear.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+                menu.addItem(clear)
+                button.menu = menu
+            }
         }
         for pack in model.packs {
-            let button = PickerMediaButton(sticker: pack.stickers.first, target: self, action: #selector(selectTab(_:)))
+            let button = PickerPackTabButton(sticker: pack.stickers.first, target: self, action: #selector(selectTab(_:)))
+            button.tabStrip = tabs
             configureTab(button, id: pack.id, label: pack.title)
         }
         updateTabs()
@@ -720,7 +927,7 @@ private final class PickerContentView: NSView {
         }
     }
     @objc private func selectTab(_ sender: NSButton) {
-        if let id = sender.identifier?.rawValue { selectPack(id: id) }
+        if let id = sender.identifier?.rawValue { selectPack(id: id, viaTab: true) }
     }
 }
 
@@ -748,7 +955,7 @@ private actor PickerMediaLoader {
 }
 
 @MainActor
-private final class PickerMediaButton: NSButton {
+private class PickerMediaButton: NSButton {
     private let preview = PickerPreviewImage()
     private var sticker: PickerSticker?
     private var suspended = false
@@ -839,6 +1046,122 @@ private final class PickerMediaButton: NSButton {
     }
 }
 
+/// Only pack tabs participate; the all/recent controls keep their fixed positions.
+@MainActor
+private final class PickerPackTabStrip: NSStackView {
+    static let pasteboardType = NSPasteboard.PasteboardType("com.sihyeon.TelegramSticker.picker-pack")
+    var onBeginDrag: (() -> Void)?
+    var onEndDrag: (() -> Void)?
+    var onMovePack: ((String, Int) -> Bool)?
+    private var insertionX: CGFloat? { didSet { needsDisplay = true } }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([Self.pasteboardType])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let x = insertionX else { return }
+        NSColor.controlAccentColor.setFill()
+        NSBezierPath(roundedRect: NSRect(x: x - 1, y: 3, width: 2, height: max(0, bounds.height - 6)),
+                     xRadius: 1, yRadius: 1).fill()
+    }
+    private func source(for sender: NSDraggingInfo) -> PickerPackTabButton? {
+        guard let source = sender.draggingSource as? PickerPackTabButton, source.tabStrip === self,
+              let id = source.identifier?.rawValue,
+              sender.draggingPasteboard.string(forType: Self.pasteboardType) == id,
+              sender.draggingSourceOperationMask.contains(.move) else { return nil }
+        return source
+    }
+    private func insertion(for sender: NSDraggingInfo, source: PickerPackTabButton) -> Int {
+        let point = convert(sender.draggingLocation, from: nil)
+        let others = arrangedSubviews.compactMap { $0 as? PickerPackTabButton }.filter { $0 !== source }
+        let index = others.firstIndex(where: { point.x < $0.frame.midX }) ?? others.count
+        if index < others.count { insertionX = others[index].frame.minX - spacing / 2 }
+        else { insertionX = (others.last ?? source).frame.maxX + spacing / 2 }
+        return index
+    }
+    private func updateDrop(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let source = source(for: sender) else { insertionX = nil; return [] }
+        if let scroll = enclosingScrollView {
+            let clip = scroll.contentView
+            let point = convert(sender.draggingLocation, from: nil)
+            let visible = visibleRect
+            let delta: CGFloat = point.x < visible.minX + 22 ? -12 : point.x > visible.maxX - 22 ? 12 : 0
+            let x = min(max(0, clip.bounds.minX + delta), max(0, bounds.width - clip.bounds.width))
+            if x != clip.bounds.minX {
+                clip.scroll(to: NSPoint(x: x, y: clip.bounds.minY))
+                scroll.reflectScrolledClipView(clip)
+            }
+        }
+        _ = insertion(for: sender, source: source)
+        return .move
+    }
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { updateDrop(sender) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { updateDrop(sender) }
+    override func wantsPeriodicDraggingUpdates() -> Bool { true }
+    override func draggingExited(_ sender: NSDraggingInfo?) { insertionX = nil }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { source(for: sender) != nil }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { insertionX = nil }
+        guard let source = source(for: sender), let id = source.identifier?.rawValue,
+              visibleRect.contains(convert(sender.draggingLocation, from: nil)) else { return false }
+        return onMovePack?(id, insertion(for: sender, source: source)) ?? false
+    }
+    func finishDragging() {
+        insertionX = nil
+        onEndDrag?()
+    }
+}
+
+@MainActor
+private final class PickerPackTabButton: PickerMediaButton, NSDraggingSource {
+    weak var tabStrip: PickerPackTabStrip?
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled, let window, let tabStrip, let id = identifier?.rawValue else {
+            super.mouseDown(with: event); return
+        }
+        highlight(true)
+        defer { highlight(false) }
+        let start = event.locationInWindow
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantFuture,
+                                          inMode: .eventTracking, dequeue: true) {
+            guard self.window === window, window.isVisible else { return }
+            if next.type == .leftMouseUp {
+                if bounds.contains(convert(next.locationInWindow, from: nil)) { performClick(nil) }
+                return
+            }
+            let point = next.locationInWindow
+            guard hypot(point.x - start.x, point.y - start.y) >= 4 else { continue }
+            highlight(false)
+            let image = NSImage(size: bounds.size)
+            if let bitmap = bitmapImageRepForCachingDisplay(in: bounds) {
+                cacheDisplay(in: bounds, to: bitmap)
+                image.addRepresentation(bitmap)
+            }
+            let item = NSPasteboardItem()
+            item.setString(id, forType: PickerPackTabStrip.pasteboardType)
+            let draggingItem = NSDraggingItem(pasteboardWriter: item)
+            draggingItem.setDraggingFrame(bounds, contents: image)
+            tabStrip.onBeginDrag?()
+            alphaValue = 0.35
+            beginDraggingSession(with: [draggingItem], event: event, source: self)
+            return
+        }
+    }
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .withinApplication ? .move : []
+    }
+    func ignoreModifierKeys(for session: NSDraggingSession) -> Bool { true }
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        alphaValue = 1
+        tabStrip?.finishDragging()
+    }
+}
+
 /// A lightweight document owns geometry; only viewport cells exist as AppKit controls.
 private final class PickerGridDocument: NSView {
     override var isFlipped: Bool { true }
@@ -887,7 +1210,7 @@ private final class PickerPageView: NSScrollView {
     private var geometry: [SectionLayout] = []
     private var columns = 0
     private var cellSide: CGFloat = 68
-    private let gap: CGFloat = 2
+    private let gap = PickerLayout.stickerSpacing
     private var cellTarget: CGFloat = 72
     private var zooming = false
     private var measuredWidth: CGFloat = -1

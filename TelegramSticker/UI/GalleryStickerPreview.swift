@@ -56,6 +56,7 @@ private struct GalleryPlayback: UIViewRepresentable {
     }
     func updateUIView(_ view: GIFPlaybackView, context: Context) {
         view.playbackPaused = paused
+        view.setPoster(poster)
         let id = (files.poster?.path ?? "") + "|" + (files.animation?.path ?? "")
         guard context.coordinator.id != id else { return }
         context.coordinator.id = id

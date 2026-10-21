@@ -1,17 +1,8 @@
 import Foundation
 import UniformTypeIdentifiers
-import CoreTransferable
 
 extension UTType {
     nonisolated static let stickerBridgeLinks = UTType(exportedAs: "com.sihyeon.TelegramSticker.pack-links", conformingTo: .plainText)
-}
-
-nonisolated struct StickerLinkFile: Transferable {
-    let text: String
-    static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(exportedContentType: .stickerBridgeLinks) { Data($0.text.utf8) }
-            .suggestedFileName("LinkList.stickerlinks")
-    }
 }
 
 nonisolated enum PackLinkList {

@@ -600,3 +600,42 @@ DownloadLogsView의 선택 작업 복사도 클립보드 기록 후 선택 모�
 목록 네이티브 이동 재수정 빌드·설치: iPhone 15 Pro와 iPad Pro 12.9 M2의 Debug 빌드 및 Catalyst arm64 Release 빌드 성공. 두 실기기와 Mac에 기존 데이터 유지 덮어쓰기 설치·실행 완료. Mac 서명 검증 성공. 사용자 지시에 따라 테스트·수동 UI 검증은 실행하지 않았으며 실제 길게 누르기 동작을 검증 완료한 것으로 보고하지 않는다.
 
 2026-10-19 상세 공유 버튼 보정: UI/PackLinkSharing.swift의 iPhone·iPad 공유 버튼은 시스템 SwiftUI Button·Label로 표시하고 배경의 비상호작용 UIView를 공유 팝오버의 sourceView/sourceRect로 사용한다. 앞선 UIKit 버튼 교체로 달라진 아이콘 크기·툴바 배치를 복구하고 표시와 팝오버 기준점 책임을 같은 파일에 둔다. Catalyst 기존 경로·타깃·리소스·저장 경로 변경은 없다. 테스트·수동 UI 검증은 실행하지 않는다.
+
+## 2026-10-21 앱·키보드 시작 및 팩 전환 성능 정리
+
+- `Shared/Models/LibraryModels.swift`의 읽기 전용 `LibraryContents`가 검증된 스티커·커버·ID 조회표를 담고, `LibrarySnapshot.references`가 같은 읽기에서 얻은 인덱스 참조를 전달한다. 디스크 Codable 형식은 변경하지 않는다.
+- `Shared/Storage/LibraryReader.swift`의 `LibrarySnapshotLoader` actor는 앱·키보드 각 프로세스에서 파일 읽기·경로 검증·모델 준비를 직렬화한다. root·libraryRevision·cacheGeneration이 같은 정상 결과만 재사용하며 경고가 있는 읽기는 재시도한다. 디렉터리 검증 캐시는 한 번의 읽기 안에서만 유지한다.
+- `Features/Library/LibraryModel.swift`는 초기화 시 준비된 메모리만 복원하고 비동기 refresh를 합친다. 화면 커버·상세 스티커 조회는 파일을 읽지 않는다. 첫 로딩은 빈 라이브러리와 구분하고 실패 시 표시 중인 정상 데이터를 유지한다.
+- `App/TelegramStickerApp.swift`의 갤러리 선행 복원과 옛 비교 폴더 시작 시 순회를 제거했다. 이전 `StickerOptimization-<UUID>` 폴더 정리는 기존 AppDisposableCache 범위에 남긴다.
+- `Features/Gallery/GalleryCatalogStore.swift`는 갤러리 활성화 후 비동기로 저장 목록을 복원한다. GalleryPreviewState는 보이는 카드의 복원 요청만 합치고 GalleryDiskCache·GalleryPreviewStore는 공통 라이브러리 읽기 캐시를 재사용한다. 화면 이탈·캐시 정리 세대가 지난 결과는 게시하지 않는다.
+- `StickerKeyboard/State/KeyboardState.swift`가 준비된 라이브러리·순서별 섹션·개수·선택 버전을 관리한다. 최근 사용 정리는 정상 라이브러리 갱신 때만 수행하고, 팩 전환마다 전체 스티커 ID/평탄 배열을 만들지 않는다. 컨트롤러의 첫 표시는 메모리 복원과 비동기 읽기로 나뉜다.
+- 키보드 LibraryLoading은 표시된 팩 탭 포스터만 비동기로 준비한다. 셀의 기존 비동기 디코더를 유지하며 표시 전 동기 포스터 디코딩은 제거했다. 팩 선택 UI는 이전·새 탭만 갱신하고, 드래그/페이지 전환 중 도착한 라이브러리는 종료 후 반영한다. 선택·순서·최근 사용·스크롤 위치 저장 키는 유지한다.
+- MacDesktopCoordinator는 백그라운드에서 검증·준비한 불변 스냅샷만 동기 AppKit 콜백에 반환한다. DesktopBridge에 updateSnapshot/setLibraryStatus를 추가했다. DesktopPlugin은 기존 패널 안에서 데이터를 갱신하며 제스처·리사이즈 종료를 기다리고 선택·스크롤 위치를 유지한다. 첫 로딩의 빈 데이터로 최근 사용/마지막 팩을 삭제하지 않는다.
+- 미사용 PackLinkShareMenu·PackLinksShareView·AnimationPreview·AppGlassContainer·KeyboardPermissionNotice·StickerLinkFile·RemotePack.staticStickers·GIFValidation.maximumBytes를 제거했다. 단일 최적화 프로필은 기존 256px/15fps·동일 품질 문자열 상수로 정리했고 사용하지 않는 retainOldRevisions 인자를 제거했다. 링크 파일 UTType과 현재 공유·가져오기 기능, 과거 다운로드 재개용 PackUpdateScope·샘플·fixture는 유지한다.
+- 파일 추가·이동·삭제 없이 기존 파일 내부 책임을 변경했다. 앱/키보드/Shared/MacDesktop 타깃 경계·번들 리소스·LibraryWriter 게시·App Group 및 사용자 데이터 경로는 유지한다. 기존 초기 로딩 관련 테스트 소스는 비동기 조회에 맞춰 수정했지만 테스트·수동 UI 검증·성능 실측은 실행하지 않는다.
+
+성능 정리 빌드·설치 완료: iPhone 15 Pro·iPad Pro 12.9 M2 각각의 실기기 목적지 Debug 빌드 및 Catalyst arm64 Release 빌드 성공. iOS 증분 빌드 결과의 Assets.car 서명 불일치로 최초 실행이 거부되어 generic iOS clean build로 산출물을 다시 만들었으며, 앱·확장 deep/strict 서명 검증 후 두 실기기에 기존 데이터 유지 재설치·실행을 완료했다. Mac은 실제 기존 설치 위치인 /Applications/TelegramSticker.app을 백업 후 정상 Xcode 서명 빌드로 교체·실행했고 deep/strict 서명을 확인했다. 이전 Mac 앱은 .build/MacInstallBackup.Performance.n_ujt1sa/TelegramSticker.app에 보관했다. 파일 이동·타깃·리소스·공유 저장 형식 변경은 없으며 테스트·수동 UI 검증·성능 실측은 실행하지 않았다.
+
+2026-10-21 키보드 최근 내역 개수 제한 제거: `StickerKeyboard/State/RecentStickerStore.swift`의 복원·기록 시 24개 절삭을 제거한다. 최신 복사 순서·중복 제거·ID 검증·삭제된 스티커 정리·수동 비우기와 기존 UserDefaults 키는 유지한다. 기존 테스트 소스의 24개 제한 기대값만 새 동작에 맞췄으며 테스트는 실행하지 않는다. 파일·책임·타깃·리소스·저장 경로 변경은 없다.
+
+최근 내역 제한 제거 빌드·설치: iPhone 15 Pro·iPad Pro 12.9 M2 목적지 Debug, iPhone 18 Pro Max Simulator Debug 및 Catalyst arm64 Release 빌드 성공. iOS 목적지 전환 후 증분 산출물 서명 오류를 발견해 generic iOS clean build로 재생성하고 deep/strict 서명을 확인했다. 두 실기기와 /Applications/TelegramSticker.app에 기존 데이터 유지 덮어쓰기 설치·실행 완료. Mac 이전 앱은 .build/MacInstallBackup.Recent.pyyjuk9f/TelegramSticker.app에 보관했다. 테스트·수동 UI 검증은 실행하지 않았다.
+
+2026-10-21 앱 GIF 자동 시작·연속 재생 보정: UI/AnimationPreview.swift의 StickerLargePreview는 URL이 준비되면 포스터 디코딩과 독립적으로 GIF 타임라인을 구성한다. 재생 준비를 paused 해제 이후 SwiftUI 갱신에 맡기던 animationConfigured 상태를 제거했다. LibraryView의 팩 커버와 InstalledPackView의 스티커는 스크롤·핀치 중에도 재생하며, 처음 false인 onScrollVisibilityChange에 의존하던 상세 전용 InstalledStickerPreview 래퍼를 제거한다. 갤러리 카드 로딩도 LazyVGrid의 나타남/사라짐 수명으로 시작·중지하고, 동일 파일의 포스터 도착을 GalleryPlayback에 반영한다. Shared/Imaging/GIFPlaybackView.swift는 타임라인 준비·윈도 연결·첫 유효 레이아웃·일시정지 해제 때 첫 프레임을 요청한다. 기존 공통 재생 시계·비동기 직렬 디코더·프레임 캐시·뷰 clipping 기반 가시성 확인·화면 비활성 및 동작 줄이기 처리는 유지한다. 파일·타깃·리소스·복사·저장 데이터 경계 변경은 없다. 앞선 앱 스크롤 중 GIF 보류 설명을 대체하며 테스트·수동 UI 검증은 실행하지 않는다.
+
+앱 GIF 보정 빌드·설치: iPhone 15 Pro·iPad Pro 12.9 M2 목적지 Debug 및 Catalyst arm64 Release 빌드 성공. iOS 목적지 전환 후 산출물 서명 불일치가 있어 generic iOS clean build로 재생성하고 deep/strict 서명을 확인했다. 두 실기기에 기존 데이터 유지 덮어쓰기 설치·실행을 완료했다. Mac도 /Applications/TelegramSticker.app의 기존 서명·데이터 경계를 유지해 교체·실행하고 deep/strict 서명을 확인했으며 이전 앱은 .build/MacInstallBackup.GIF.prm552fw/TelegramSticker.app에 보관했다. 테스트·수동 UI 검증·성능 실측은 실행하지 않았다.
+
+2026-10-21 Mac 팝업 투명도·외곽 여백: `MacDesktop/DesktopPlugin.swift`의 팝업 배경은 NSGlassEffectView의 clear 스타일을 사용한다. PickerLayout.stickerSpacing의 2pt를 스티커 사이 간격과 창의 네 방향 외곽 여백에 함께 적용해 기존 16pt 여백을 줄인다. 투명도 줄이기 접근성 설정의 불투명 배경은 유지한다. 기존 파일 내부 UI 값 변경이며 파일·책임·타깃·리소스·저장 경로 변경은 없다. 테스트·수동 UI 검증은 실행하지 않는다.
+
+Mac 팝업 투명도·여백 빌드·설치: Catalyst arm64 Release 및 generic iOS Debug clean build 성공. 앱 deep/strict 서명 확인 후 Mac의 /Applications/TelegramSticker.app과 연결된 iPhone 15 Pro·iPad Pro 12.9 M2에 기존 데이터 유지 덮어쓰기 설치·실행을 완료했다. 이전 Mac 앱은 .build/MacInstallBackup.PopupGlass.05tpg5is/TelegramSticker.app에 보관했다. 테스트·수동 UI 검증은 실행하지 않았다.
+
+2026-10-21 Mac 팝업 투명도·팩 탭 클릭 후속: `MacDesktop/DesktopPlugin.swift`는 clear 글래스에 시스템 windowBackgroundColor의 12% tint를 더한다. 2pt 외곽 여백으로 제목 표시줄과 겹친 상단 팩 버튼의 클릭 경계를 분리하기 위해 PickerPanel을 titled/fullSizeContentView 대신 borderless/resizable/nonactivatingPanel로 생성하고 제목 표시줄 전용 설정을 제거한다. 키 윈도 허용·배경 드래그·가장자리 크기 조절·프레임 저장·스와이프·2pt 간격과 투명도 줄이기 접근성 처리는 유지한다. 기존 파일 내부 창 구성 변경이며 파일·타깃·리소스·라이브러리 저장 경로 변경은 없다. 앞선 titled 패널 설명을 대체한다. 테스트·수동 UI 검증은 실행하지 않는다.
+
+Mac 팩 탭 클릭 후속 빌드·설치: Catalyst arm64 Release 및 generic iOS Debug 빌드 성공. 앱 deep/strict 서명 확인 후 Mac의 /Applications/TelegramSticker.app과 연결된 iPhone 15 Pro·iPad Pro 12.9 M2에 기존 데이터를 유지해 덮어쓰기 설치·실행했다. 이전 Mac 앱은 .build/MacInstallBackup.PopupTabs.2cn40s05/TelegramSticker.app에 보관했다. 테스트·수동 클릭 검증은 실행하지 않았다.
+
+2026-10-21 Mac 팩 클릭 연속 이동·배경 블러: `MacDesktop/DesktopPlugin.swift`의 팩 클릭은 목적지를 한 화면 옆에 배치하는 대신 인접 팩들을 차례로 통과한다. 중간 페이지는 거리별 24~70ms의 선형 이동, 마지막 페이지는 140ms 감속을 사용하며 한 팩 이동은 180ms다. 현재·다음 페이지만 유지하고 연속 이동 중 GIF 재생을 보류하며 도착 또는 중단 시 재개한다. 새 입력·창 닫기·리사이즈는 기존 transitionToken으로 뒤따를 이동을 취소한다. 동작 줄이기에서는 목적지로 즉시 이동하고 스와이프의 기존 spring은 유지한다. 팝업 NSGlassEffectView는 clear/12% tint 대신 regular 스타일로 바꿔 배경 블러를 강화한다. borderless 팩 클릭 영역·2pt 외곽 간격·스크롤 저장·타깃·리소스·라이브러리 저장 경로는 유지하며 파일 추가·이동은 없다. 테스트·수동 UI 검증은 실행하지 않는다.
+
+Mac 연속 팩 이동·블러 빌드·설치: Catalyst arm64 Release 및 generic iOS Debug 빌드 성공. 앱 deep/strict 서명 확인 후 Mac의 /Applications/TelegramSticker.app과 연결된 iPhone 15 Pro·iPad Pro 12.9 M2에 기존 데이터를 유지해 덮어쓰기 설치·실행했다. 이전 Mac 앱은 .build/MacInstallBackup.PopupTravel.lk7jytfl/TelegramSticker.app에 보관했다. 테스트·수동 애니메이션 검증은 실행하지 않았다.
+
+2026-10-21 Mac 최근 내역 메뉴·팩 드래그 순서: `MacDesktop/DesktopPlugin.swift`의 최근 사용 탭은 native NSMenu로 최근 사용 내역 지우기를 제공한다. PickerModel.clearRecent가 Mac 전용 mac.recentStickers와 최근 탭 스크롤 위치를 지우고, 현재 열린 최근 페이지도 즉시 갱신한다. 빈 내역에서는 메뉴 항목을 비활성화한다. PickerPackTabButton/PickerPackTabStrip은 4pt 이동 후 AppKit 드래그를 시작하고 삽입 표시·가장자리 자동 가로 스크롤·취소 복귀를 제공한다. 같은 탭 줄에서 온 팩 ID만 받아 드롭이 확정될 때 PickerModel.movePack으로 mac.pickerPackOrder.v1에 순서를 저장한다. 전체·최근 탭은 고정하며 변경한 팩 순서를 전체 그리드·스와이프·연속 팩 이동에 함께 적용한다. 새 팩은 뒤에 추가하고 삭제된 팩 순서는 정상 라이브러리 갱신 때 정리하며 초기 미로딩 상태에서는 저장 순서를 지우지 않는다. 메뉴·팩 드래그 동안 스냅샷 적용과 외부 클릭 닫기를 보류하고 드래그 중 GIF 재생을 보류한다. 기존 파일 내부 Mac UI·환경설정 책임 확장이며 파일 추가·이동·타깃·리소스 변경은 없다. MacDesktop 파일 시스템 동기화 그룹의 macOS 번들 경계를 유지하고 키보드 상태·앱 LibraryWriter의 설치 순서·공유 라이브러리 경로는 변경하지 않는다. 테스트·수동 UI 검증은 실행하지 않는다.
+
+Mac 최근 내역 메뉴·팩 드래그 빌드·설치: 최종 Catalyst arm64 Release 및 generic iOS Debug 빌드 성공. 앱 deep/strict 서명 확인 후 Mac의 /Applications/TelegramSticker.app과 연결된 iPhone 15 Pro·iPad Pro 12.9 M2에 기존 데이터를 유지해 덮어쓰기 설치·실행했다. 이전 Mac 앱은 .build/MacInstallBackup.PopupReorder.eboiq8i6/TelegramSticker.app에 보관했다. 드롭 후 탭 줄의 가로 스크롤 위치를 유지한다. 테스트·수동 메뉴/드래그 검증은 실행하지 않았다.

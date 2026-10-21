@@ -7,7 +7,6 @@ nonisolated struct RemotePack: Codable, Sendable, Equatable {
     let stickers: [RemoteSticker]
     var fetchedAt: Double? = nil
     var refreshed: Bool? = nil
-    var staticStickers: [RemoteSticker] { stickerType == "regular" ? stickers.filter { $0.format == "static" } : [] }
     var installableStickers: [RemoteSticker] { stickerType == "regular" ? stickers : [] }
     func validate(requestedName: String) throws {
         guard fetchedAt == nil || (fetchedAt!.isFinite && fetchedAt! > 0),

@@ -15,7 +15,6 @@ struct InstalledPackView: View {
     let retry: () -> Void
     let optimize: (Set<String>) -> Void
     let delete: () async -> Void
-    @State private var scrolling = false
     @State private var status = "두 손가락으로 확대하거나 축소할 수 있어요."
     @FocusState private var commandFocus: Bool
     @State private var focusedStickerID: String?
@@ -119,8 +118,8 @@ struct InstalledPackView: View {
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columnCount), spacing: 4) {
                     ForEach(stickers) { sticker in
-                            InstalledStickerPreview(sticker: sticker,
-                                paused: scrolling || pinching || activeTab != .library || scenePhase != .active || reduceMotion)
+                            StickerLargePreview(sticker: sticker,
+                                paused: activeTab != .library || scenePhase != .active || reduceMotion)
                             .accessibilityHidden(true)
                             .allowsHitTesting(false)
                             .modifier(StickerCopyFeedback(generation: copyGenerations[sticker.id, default: 0], reduceMotion: reduceMotion))
@@ -199,10 +198,6 @@ struct InstalledPackView: View {
                     }
                 }
             }.padding(.horizontal, 12).padding(.vertical, 8)
-        }
-        .onScrollPhaseChange { _, phase in
-            let active = phase != .idle
-            if scrolling != active { scrolling = active }
         }
         .onChange(of: geometry.size) { _, _ in selectionGestureGeneration += 1 }
         .simultaneousGesture(gridZoom)
@@ -446,17 +441,5 @@ private struct StickerCopyFeedback: ViewModifier {
                 LinearKeyframe(0, duration: 0.2)
             }
         }
-    }
-}
-
-/// Visibility changes stay local to each cell instead of invalidating the whole pack.
-private struct InstalledStickerPreview: View {
-    let sticker: Sticker
-    let paused: Bool
-    @State private var visible = false
-
-    var body: some View {
-        StickerLargePreview(sticker: sticker, paused: paused || !visible)
-            .onScrollVisibilityChange(threshold: 0.01) { visible = $0 }
     }
 }

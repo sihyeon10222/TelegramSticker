@@ -41,9 +41,7 @@ struct GalleryView: View {
     @State private var selectionGeneration = 0
     private var selectableIDs: [String] { catalog.packs.filter { !installed.contains($0.id.lowercased()) }.map(\.id) }
     @State private var installed = Set<String>()
-    @State private var client: WorkerClient? = {
-        (try? ImportSettings.load()).map { WorkerClient(configuration: $0) }
-    }()
+    @State private var client: WorkerClient?
     @State private var installation: GalleryInstallation?
     @State private var error: String?
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 320), spacing: 12)]
@@ -121,22 +119,20 @@ struct GalleryView: View {
             .alert("갤러리", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("확인", role: .cancel) {}
             } message: { Text(error ?? "") }
-            .task {
-                await GalleryPreviewState.shared.restoreRemaining()
+            .task(id: galleryVisible && scenePhase == .active) {
+                guard galleryVisible, scenePhase == .active else { return }
+                await catalog.restore()
+                guard !Task.isCancelled else { return }
                 do {
                     if client == nil, let config = try ImportSettings.load() { client = WorkerClient(configuration: config) }
                 } catch { self.error = error.localizedDescription }
                 await refreshInstalled()
                 if let client { await catalog.refresh(client: client) }
             }
-            .onAppear {
-                galleryVisible = true
-                if let client { Task { await catalog.refresh(client: client) } }
-            }
+            .onAppear { galleryVisible = true }
             .onDisappear { galleryVisible = false; GalleryPreviewState.shared.cancelLoading() }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { GalleryPreviewState.shared.cancelLoading() }
-                if phase == .active, galleryVisible, let client { Task { await catalog.refresh(client: client) } }
             }
             .onChange(of: catalog.packs.map(\.id)) { _, ids in selected.formIntersection(ids) }
             .onChange(of: ImportActivity.shared.libraryChangeID) { _, _ in Task { await refreshInstalled() } }
@@ -204,9 +200,12 @@ private struct GalleryPackCard: View {
         .buttonStyle(.plain).disabled(installed)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel((pack?.title ?? entry.title) + (installed ? ", 설치됨" : selected ? ", 선택됨" : ", 선택 안 됨"))
-        .onScrollVisibilityChange(threshold: 0.01) { cardVisible = $0 }
+        .onAppear { cardVisible = true }
+        .onDisappear { cardVisible = false }
         .task(id: "\(cardVisible && galleryVisible)-\(client != nil)-\(previewCache.generation)") {
-            guard cardVisible, galleryVisible, !previewCache.maintaining, let client else { return }
+            guard cardVisible, galleryVisible, !previewCache.maintaining else { return }
+            await previewCache.restore(name: entry.id)
+            guard !Task.isCancelled, let client else { return }
             // Publish durable metadata before waiting for a freshness check.
             if let cached = await GalleryMetadataStore.shared.cached(name: entry.id) {
                 previewCache.metadata[entry.id] = cached; previewUnavailable = false

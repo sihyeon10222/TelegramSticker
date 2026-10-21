@@ -15,18 +15,6 @@ struct TelegramStickerApp: App {
         #if !targetEnvironment(macCatalyst)
         _ = KeyboardAccessMonitor.shared
         #endif
-        _ = GalleryPreviewState.shared
-        Task { await GalleryPreviewState.shared.restoreRemaining() }
-        // Capture only files left by the previous process, before any new comparison starts.
-        let temporary = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-        let stale = ((try? FileManager.default.contentsOfDirectory(at: temporary, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? [])
-            .filter { $0.lastPathComponent.hasPrefix("StickerOptimization-") && UUID(uuidString: String($0.lastPathComponent.dropFirst("StickerOptimization-".count))) != nil }
-        Task.detached(priority: .utility) {
-            for directory in stale {
-                guard (try? directory.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == false else { continue }
-                try? FileManager.default.removeItem(at: directory)
-            }
-        }
     }
 
     var body: some Scene {

@@ -62,7 +62,7 @@ struct KeyboardPresentationTests {
         #expect(newHost.selection == .recent)
     }
 
-    @Test func installedPacksExistBeforeTheAppStartsAsyncMaintenance() async throws {
+    @Test func installedPacksLoadBeforeAsyncMaintenance() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -78,6 +78,7 @@ struct KeyboardPresentationTests {
         let metadata = try reader.snapshot(resolvingFiles: false)
         #expect(metadata.files.isEmpty)
         let model = LibraryModel(reader: reader, writer: writer)
+        await model.refresh()
         #expect(model.packs.map(\.title) == ["Already installed"])
         #expect(model.packs.first?.stickers.count == 1)
         #expect(model.cover(in: try #require(model.packs.first)) != nil)

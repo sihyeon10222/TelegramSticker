@@ -7,7 +7,17 @@ final class KeyboardViewController: UIInputViewController,
     let state = KeyboardState()
     let performance = OSSignposter(subsystem: "com.sihyeon.TelegramSticker.StickerKeyboard", category: "PointsOfInterest")
     var displayedCacheGeneration: String?
-    var tabSignature: [String] = []
+    var displayedTabsRevision = -1
+    var displayedSelectionRevision = -1
+    var tabButtons: [String: PackTabButton] = [:]
+    var selectedTabIdentifier: String?
+    struct PendingLibrary {
+        let contents: LibraryContents
+        let generation: Int
+        let status: String?
+        let persistent: Bool
+    }
+    var pendingLibrary: PendingLibrary?
     var playbackSuspended = false
     typealias Selection = KeyboardSelection
     var dragSession: PackDragSession?
@@ -129,6 +139,7 @@ final class KeyboardViewController: UIInputViewController,
         globeHeight = nextKeyboardButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
         updateSwitchKey()
 
+        tabScroll.delegate = self
         tabScroll.showsHorizontalScrollIndicator = false
         tabScroll.delaysContentTouches = false
         tabScroll.canCancelContentTouches = true
@@ -242,8 +253,10 @@ final class KeyboardViewController: UIInputViewController,
         presentationActive = true
         loadGeneration += 1
         loadTask?.cancel()
+        loadTask = nil
+        pendingLibrary = nil
         copyTask?.cancel()
-        // Finish restoration before this controller can draw in a new host/field.
+        // Restore prepared memory immediately; disk changes arrive asynchronously.
         // A retained controller may be older than another controller in this process.
         UIView.performWithoutAnimation {
             cancelPaging()
@@ -262,10 +275,11 @@ final class KeyboardViewController: UIInputViewController,
             view.layoutIfNeeded()
             collectionView.layoutIfNeeded()
             restoreScrollPositionIfNeeded()
-            prepareVisiblePosters()
+            prepareVisibleTabPosters()
         }
         playbackSuspended = false
         updatePlaybackState()
+        reloadLibrary()
     }
 
     override func viewWillLayoutSubviews() {
@@ -281,10 +295,12 @@ final class KeyboardViewController: UIInputViewController,
         super.viewDidLayoutSubviews()
         restoreScrollPositionIfNeeded()
         revealSelectedTabIfNeeded()
+        prepareVisibleTabPosters()
     }
 
     func restoreScrollPositionIfNeeded() {
         guard pendingScrollRestoration, collectionView.bounds.height > 0, collectionView.bounds.width > 0 else { return }
+        guard state.libraryRevision != nil else { return }
         pendingScrollRestoration = false
         collectionView.layoutIfNeeded()
         let maximum = max(0, collectionView.contentSize.height - collectionView.bounds.height)
@@ -333,9 +349,11 @@ final class KeyboardViewController: UIInputViewController,
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        cancelPaging()
-        state.saveScrollOffset(Double(collectionView.contentOffset.y))
         presentationActive = false
+        pendingLibrary = nil
+        cancelPaging()
+        if state.libraryRevision != nil, !pendingScrollRestoration { state.saveScrollOffset(Double(collectionView.contentOffset.y)) }
+        for button in tabButtons.values { button.posterTask?.cancel(); button.posterTask = nil }
         loadGeneration += 1
         playbackSuspended = true
         updatePlaybackState()

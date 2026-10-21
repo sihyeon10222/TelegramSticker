@@ -8,9 +8,10 @@ final class MacDesktopCoordinator {
     private var bundle: Bundle?
     private var plugin: DesktopPluginProtocol?
     private var stickers: [String: Sticker] = [:]
-    private var library: LibraryModel?
+    private var refreshTask: Task<Void, Never>?
     private var snapshotRevision: String?
     private var snapshotGeneration: String?
+    private var snapshotWarnings: [String] = []
     private var cachedSnapshot: [NSDictionary] = []
 
     func start() {
@@ -32,39 +33,56 @@ final class MacDesktopCoordinator {
                 NotificationCenter.default.post(name: .macOpenManagement, object: nil)
             }
         })
+        refreshSnapshot()
     }
 
+    /// AppKit's synchronous callback returns prepared memory, never filesystem work.
     private func snapshot() -> [NSDictionary] {
-        // Check the small published index; resolve every sticker path only when it changes.
-        let index = try? LibraryReader.shared().index()
-        if let index, snapshotRevision == index.libraryRevision,
-           snapshotGeneration == index.cacheGeneration { return cachedSnapshot }
-        let library = LibraryModel()
-        self.library = library
-        stickers.removeAll()
-        let result: [NSDictionary] = library.packs.map { pack in
-            var playback: [String: String] = [:]
-            for record in pack.stickers {
-                if let path = record.playbackPath, let url = try? library.reader?.file(path) {
-                    playback["\(pack.id).\(record.id)"] = url.path
-                }
+        refreshSnapshot()
+        return cachedSnapshot
+    }
+
+    private func refreshSnapshot() {
+        guard refreshTask == nil else { return }
+        refreshTask = Task {
+            defer { refreshTask = nil }
+            do {
+                let contents = try await LibrarySnapshotLoader.shared.loadShared()
+                let snapshot = contents.snapshot
+                plugin?.setLibraryStatus(snapshot.warnings.first)
+                guard snapshotRevision != snapshot.revision || snapshotGeneration != snapshot.cacheGeneration
+                    || snapshotWarnings != snapshot.warnings else { return }
+                let prepared = await Task.detached(priority: .userInitiated) {
+                    let values: [NSDictionary] = snapshot.packs.map { pack in
+                        let items: [NSDictionary] = (contents.stickers[pack.id] ?? []).map { sticker in
+                            ["id": sticker.id, "name": sticker.name,
+                             "thumbnail": sticker.thumbnailURL?.path ?? "",
+                             "playback": sticker.playbackURL?.path ?? "",
+                             "animation": sticker.animationURL?.path ?? ""]
+                        }
+                        return ["id": pack.id, "title": pack.title, "stickers": items,
+                                "cacheGeneration": snapshot.cacheGeneration ?? ""]
+                    }
+                    return DesktopSnapshot(values: values, stickers: contents.byStickerID)
+                }.value
+                guard !Task.isCancelled else { return }
+                stickers = prepared.stickers
+                cachedSnapshot = prepared.values
+                snapshotRevision = snapshot.revision
+                snapshotGeneration = snapshot.cacheGeneration
+                snapshotWarnings = snapshot.warnings
+                plugin?.updateSnapshot(prepared.values)
+                plugin?.setLibraryStatus(snapshot.warnings.first)
+            } catch {
+                plugin?.setLibraryStatus("공유 목록을 갱신하지 못했어요. 메인 앱에서 확인해 주세요.")
             }
-            let items = library.stickers(in: pack).map { sticker -> NSDictionary in
-                stickers[sticker.id] = sticker
-                return ["id": sticker.id, "name": sticker.name,
-                        "thumbnail": sticker.thumbnailURL?.path ?? "",
-                        "playback": playback[sticker.id] ?? "",
-                        "animation": sticker.animationURL?.path ?? ""]
-            }
-            return ["id": pack.id, "title": pack.title, "stickers": items,
-                    "cacheGeneration": index?.cacheGeneration ?? ""]
         }
-        if library.isAvailable, let index {
-            snapshotRevision = index.libraryRevision
-            snapshotGeneration = index.cacheGeneration
-            cachedSnapshot = result
-        }
-        return result
+    }
+
+    // These Foundation dictionaries are built once off-main and never mutated.
+    nonisolated private struct DesktopSnapshot: @unchecked Sendable {
+        let values: [NSDictionary]
+        let stickers: [String: Sticker]
     }
     func showManagement() { plugin?.showManagement() }
     func togglePicker() { plugin?.togglePicker() }

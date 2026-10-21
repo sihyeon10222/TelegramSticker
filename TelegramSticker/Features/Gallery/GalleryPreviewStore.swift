@@ -19,11 +19,11 @@ final class GalleryPreviewState {
     private var items: [String: GalleryPreviewItem] = [:]
     private var order: [String] = []
     var metadata: [String: RemotePack] = [:]
-    private init() {
-        // Populate the initial viewport before SwiftUI constructs any gallery cards.
-        // Bound synchronous work; the remainder is restored off the main thread.
-        apply(GalleryDiskCache.read(names: Array(GalleryCatalogStore.shared.packs.prefix(12).map(\.id))))
-    }
+    private struct RestoreJob { let id: UUID; let task: Task<Void, Never> }
+    @ObservationIgnored private var restores: [String: RestoreJob] = [:]
+    @ObservationIgnored private var restoredNames = Set<String>()
+    private init() {}
+
     private func apply(_ cards: [GalleryCachedCard]) {
         for card in cards {
             if metadata[card.pack.name] == nil { metadata[card.pack.name] = card.pack }
@@ -33,14 +33,20 @@ final class GalleryPreviewState {
             }
         }
     }
-    func restoreRemaining() async {
-        guard !maintaining else { return }
-        let epoch = generation
-        let names = GalleryCatalogStore.shared.packs.map(\.id).filter { metadata[$0] == nil }
-        guard !names.isEmpty else { return }
-        let cards = await Task.detached(priority: .userInitiated) { GalleryDiskCache.read(names: names) }.value
-        guard !Task.isCancelled, !maintaining, generation == epoch else { return }
-        apply(cards)
+    /// Restore only a visible card. Concurrent requests share the same disk read.
+    func restore(name: String) async {
+        guard !maintaining, !restoredNames.contains(name) else { return }
+        if let existing = restores[name] { await existing.task.value; return }
+        let epoch = generation, id = UUID()
+        let task = Task {
+            defer { if restores[name]?.id == id { restores[name] = nil } }
+            let cards = await Task.detached(priority: .userInitiated) { await GalleryDiskCache.read(names: [name]) }.value
+            guard !Task.isCancelled, !maintaining, generation == epoch else { return }
+            apply(cards)
+            restoredNames.insert(name)
+        }
+        restores[name] = RestoreJob(id: id, task: task)
+        await task.value
     }
     func item(key: String) -> GalleryPreviewItem {
         if let item = items[key] { return item }
@@ -52,8 +58,14 @@ final class GalleryPreviewState {
         }
         return item
     }
-    func cancelLoading() { for item in items.values { item.cancel() } }
+    func cancelLoading() {
+        for restore in restores.values { restore.task.cancel() }
+        restores.removeAll()
+        for item in items.values { item.cancel() }
+    }
     func clearItems() {
+        cancelLoading()
+        restoredNames.removeAll()
         for item in items.values { item.clear() }
         metadata.removeAll()
     }
@@ -206,7 +218,7 @@ actor GalleryPreviewStore {
         } onCancel: { Task { await self.cancel(key: jobKey, id: job.id) } }
     }
     /// Local-only fast path: do not queue downloads, conversions or partial results.
-    func cachedFiles(pack: String, sticker: RemoteSticker) -> GalleryPreviewFiles? {
+    func cachedFiles(pack: String, sticker: RemoteSticker) async -> GalleryPreviewFiles? {
         guard maintenance == 0 else { return nil }
         let fm = FileManager.default
         let key = Self.key(pack: pack, sticker: sticker)
@@ -219,7 +231,7 @@ actor GalleryPreviewStore {
             }
             return GalleryPreviewFiles(poster: poster, animation: animation)
         }
-        if let reader = try? LibraryReader.shared(), let snapshot = try? reader.snapshot(resolvingFiles: false),
+        if let reader = try? LibraryReader.shared(), let snapshot = try? await LibrarySnapshotLoader.shared.load(reader: reader).snapshot,
            let manifest = snapshot.packs.first(where: { $0.telegramName == pack }),
            let record = manifest.stickers.first(where: { $0.id == sticker.id }),
            record.sourceFormat == sticker.format,
@@ -231,7 +243,7 @@ actor GalleryPreviewStore {
     }
     private func make(pack: String, sticker: RemoteSticker, client: WorkerClient, key: String, animate: Bool) async throws -> GalleryPreviewFiles {
         // Reuse installed playback data before performing any preview network request.
-        if let reader = try? LibraryReader.shared(), let snapshot = try? reader.snapshot(resolvingFiles: false),
+        if let reader = try? LibraryReader.shared(), let snapshot = try? await LibrarySnapshotLoader.shared.load(reader: reader).snapshot,
            let manifest = snapshot.packs.first(where: { $0.telegramName == pack }),
            let record = manifest.stickers.first(where: { $0.id == sticker.id }),
            record.sourceFormat == sticker.format {

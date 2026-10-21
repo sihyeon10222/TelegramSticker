@@ -2,6 +2,10 @@ import UIKit
 import os
 
 extension KeyboardViewController {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if scrollView === tabScroll { prepareVisibleTabPosters() }
+    }
+
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if scrollView === collectionView, !decelerate {
             state.saveScrollOffset(Double(collectionView.contentOffset.y))
@@ -19,7 +23,7 @@ extension KeyboardViewController {
         case .recent: title = "최근 사용"
         case .pack(let id): title = state.packs.first(where: { $0.id == id })?.title ?? "스티커"
         }
-        return "\(title) · \(state.stickers.count)개"
+        return "\(title) · \(state.stickerCount)개"
     }
 
     func updateSelectionDescription() {

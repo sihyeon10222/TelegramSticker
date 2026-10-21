@@ -18,9 +18,18 @@ final class KeyboardState {
     private let recent = RecentStickerStore()
     private let packOrder = KeyboardPackOrderStore()
     private static var imageCacheGeneration: String?
-    private static var cachedLibrary: (LibraryReader, LibrarySnapshot)?
+    private static var cachedLibrary: LibraryContents?
+    private var allSections: [[Sticker]] = []
+    private var allStickerCount = 0
+    private var contentVersion = 0
+    private var preparedVersion = -1
+    private var preparedSelection: KeyboardSelection?
+    private var preparedRecent: [String] = []
+    private(set) var tabsRevision = 0
+    private(set) var selectionRevision = 0
 
-    private(set) var stickers: [Sticker] = []
+    private(set) var selectedSections: [[Sticker]] = []
+    private(set) var stickerCount = 0
     var hasRecentStickers: Bool { !recent.ids.isEmpty }
 
     func shouldInvalidateImageCache(for generation: String?) -> Bool {
@@ -60,8 +69,9 @@ final class KeyboardState {
 
     @discardableResult
     func reloadPreferences() -> Bool {
-        let selectionChanged = selection != selectionStore.selection
-        restoreSelection()
+        let restored = selectionStore.selection
+        let selectionChanged = selection != restored
+        selection = restored
         let historyChanged = recent.reload()
         let orderChanged = packOrder.reload()
         return selectionChanged || historyChanged || orderChanged
@@ -69,51 +79,47 @@ final class KeyboardState {
 
     @discardableResult
     func restoreLibrary() -> Bool {
-        do {
-            let reader = try self.reader ?? LibraryReader.shared()
-            let index = try reader.index()
-            if index.libraryRevision == libraryRevision,
-               index.cacheGeneration == cacheGeneration, canPruneHistory {
-                return false
-            }
-            let snapshot: LibrarySnapshot
-            if let (_, cached) = Self.cachedLibrary, cached.revision == index.libraryRevision,
-               cached.cacheGeneration == index.cacheGeneration, cached.warnings.isEmpty {
-                snapshot = cached
-            } else { snapshot = try reader.snapshot() }
-            acceptLibrary(reader: reader, snapshot: snapshot)
-            return true
-        } catch {
-            // A failed read does not mean installed stickers were deleted.
-            canPruneHistory = false
-            libraryNote = "공유 목록을 열 수 없어요. 메인 앱에서 설치된 팩을 확인해 주세요."
-            return false
-        }
+        guard let cached = Self.cachedLibrary,
+              cached.snapshot.revision != libraryRevision || cached.snapshot.cacheGeneration != cacheGeneration else { return false }
+        acceptLibrary(cached, allowPruning: false)
+        return true
     }
 
-    func acceptLibrary(reader: LibraryReader, snapshot: LibrarySnapshot) {
-        Self.cachedLibrary = (reader, snapshot)
-        self.reader = reader
+    func acceptLibrary(_ contents: LibraryContents, allowPruning: Bool = true) {
+        let snapshot = contents.snapshot
+        let changed = libraryRevision != snapshot.revision || cacheGeneration != snapshot.cacheGeneration
+        Self.cachedLibrary = contents
+        reader = contents.reader
         libraryRevision = snapshot.revision
         cacheGeneration = snapshot.cacheGeneration
         libraryPacks = snapshot.packs
-        prepared = Dictionary(uniqueKeysWithValues: snapshot.packs.map { pack in
-            (pack.id, pack.stickers.compactMap { record -> Sticker? in
-                guard let png = snapshot.files[record.pngPath], let thumb = snapshot.files[record.thumbnailPath] else { return nil }
-                return Sticker(id: pack.id + "." + record.id, name: record.name, detail: pack.title, imageURL: png, thumbnailURL: thumb,
-                    animationURL: record.animationPath.flatMap { snapshot.files[$0] }, playbackURL: record.playbackPath.flatMap { snapshot.files[$0] })
-            })
-        })
-        byStickerID = Dictionary(uniqueKeysWithValues: prepared.values.flatMap { $0 }.map { ($0.id, $0) })
-        canPruneHistory = snapshot.warnings.isEmpty
+        prepared = contents.stickers
+        byStickerID = contents.byStickerID
+        canPruneHistory = allowPruning && snapshot.warnings.isEmpty
+        if canPruneHistory { recent.prune(available: contents.stickerIDs) }
+        let previousOrder = packs.map(\.id)
         restorePackOrder()
+        if changed, previousOrder == packs.map(\.id) { rebuildSections() }
         libraryNote = snapshot.warnings.first
         if packs.isEmpty { libraryNote = snapshot.warnings.first ?? "설치한 스티커가 없어요. 앱에서 Telegram 팩을 추가해 주세요." }
     }
 
+    private func rebuildSections() {
+        allSections = packs.compactMap { pack in
+            guard let items = prepared[pack.id], !items.isEmpty else { return nil }
+            return items
+        }
+        allStickerCount = allSections.reduce(0) { $0 + $1.count }
+        contentVersion += 1
+        tabsRevision += 1
+    }
+
     func restorePackOrder() {
         let byID = Dictionary(uniqueKeysWithValues: libraryPacks.map { ($0.id, $0) })
-        packs = packOrder.orderedIDs(available: libraryPacks.map(\.id), prune: canPruneHistory).compactMap { byID[$0] }
+        let ordered = packOrder.orderedIDs(available: libraryPacks.map(\.id), prune: canPruneHistory).compactMap { byID[$0] }
+        let changed = packs.map(\.id) != ordered.map(\.id)
+        packs = ordered
+        if changed { rebuildSections() }
         if case .pack(let id) = selection, !packs.contains(where: { $0.id == id }), canPruneHistory { select(.all) }
     }
 
@@ -128,17 +134,21 @@ final class KeyboardState {
 
     func sections(for selection: KeyboardSelection) -> [[Sticker]] {
         switch selection {
-        case .all: return packs.compactMap { pack in
-            let items = prepared[pack.id] ?? []; return items.isEmpty ? nil : items
-        }
+        case .all: return allSections
         case .recent: return [recent.ids.compactMap { byStickerID[$0] }]
         case .pack(let id): return [prepared[id] ?? []]
         }
     }
 
     func prepareSelection() {
-        if canPruneHistory { recent.prune(available: Set(packs.flatMap { prepared[$0.id] ?? [] }.map(\.id))) }
-        stickers = sections(for: selection).flatMap { $0 }
+        let recentIDs = selection == .recent ? recent.ids : []
+        guard preparedSelection != selection || preparedVersion != contentVersion || preparedRecent != recentIDs else { return }
+        preparedSelection = selection
+        preparedVersion = contentVersion
+        preparedRecent = recentIDs
+        selectedSections = sections(for: selection)
+        stickerCount = selection == .all ? allStickerCount : selectedSections.reduce(0) { $0 + $1.count }
+        selectionRevision += 1
     }
 
     func recordCopy(_ id: String) { recent.record(id); lastCopiedID = id }
@@ -153,6 +163,7 @@ final class KeyboardState {
 
     @discardableResult
     func finishPackMove(original: [PackManifestV1], commit: Bool) -> Bool {
+        defer { rebuildSections() }
         let changed = packs.map(\.id) != original.map(\.id)
         if commit, changed, packOrder.reorder(packs.map(\.id), available: original.map(\.id)) { return true }
         packs = original
@@ -164,6 +175,7 @@ final class KeyboardState {
         guard packOrder.move(id, offset: offset, available: packs.map(\.id)) else { return false }
         let byID = Dictionary(uniqueKeysWithValues: packs.map { ($0.id, $0) })
         packs = packOrder.orderedIDs(available: packs.map(\.id)).compactMap { byID[$0] }
+        rebuildSections()
         return true
     }
 }

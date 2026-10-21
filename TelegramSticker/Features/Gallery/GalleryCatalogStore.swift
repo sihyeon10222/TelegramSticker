@@ -13,10 +13,28 @@ final class GalleryCatalogStore {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Gallery/catalog-v1.json")
     }
-    private init() {
-        if let data = try? Data(contentsOf: Self.file), data.count <= 65536,
-           let catalog = try? JSONDecoder().decode(RemoteGallery.self, from: data),
-           (try? catalog.validate()) != nil { apply(catalog) }
+    private var restoreTask: Task<Void, Never>?
+    private var restored = false
+    private init() {}
+
+    func restore() async {
+        guard !restored else { return }
+        if let restoreTask { await restoreTask.value; return }
+        let file = Self.file
+        let task = Task {
+            defer { restoreTask = nil }
+            let catalog = await Task.detached(priority: .userInitiated) { () -> RemoteGallery? in
+                guard let data = try? Data(contentsOf: file), data.count <= 65536,
+                      let catalog = try? JSONDecoder().decode(RemoteGallery.self, from: data),
+                      (try? catalog.validate()) != nil else { return nil }
+                return catalog
+            }.value
+            guard !Task.isCancelled else { return }
+            if let catalog { apply(catalog) }
+            restored = true
+        }
+        restoreTask = task
+        await task.value
     }
     private func apply(_ catalog: RemoteGallery) {
         packs = catalog.packs.map { GalleryRecommendation(id: $0.name, title: $0.name, symbol: "face.smiling") }
@@ -37,5 +55,5 @@ final class GalleryCatalogStore {
             DownloadDiagnostics.shared.record("GALLERY_CATALOG " + DownloadDiagnostics.errorDetails(error))
         }
     }
-    func reset() { packs = GalleryCatalog.packs; notice = nil; lastAttempt = .distantPast }
+    func reset() { restoreTask?.cancel(); restoreTask = nil; restored = true; packs = GalleryCatalog.packs; notice = nil; lastAttempt = .distantPast }
 }

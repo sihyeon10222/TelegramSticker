@@ -2,14 +2,6 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-nonisolated enum StorageOptimizationProfile: String, CaseIterable, Identifiable, Sendable, Hashable {
-    case compact
-    var id: String { rawValue }
-    var pixels: Int { 256 }
-    var fps: Int { 15 }
-    var title: String { "용량 우선" }
-    var label: String { "용량 최적화 · \(pixels)px · 최대 \(fps)fps" }
-}
 nonisolated enum StorageOptimizationError: Error { case noSavings }
 nonisolated struct StorageOptimizationResult: Sendable {
     var saved: Int64 = 0
@@ -18,7 +10,9 @@ nonisolated struct StorageOptimizationResult: Sendable {
 }
 
 nonisolated enum StickerStorageOptimizer {
-    static let label = StorageOptimizationProfile.compact.label
+    static let pixels = 256
+    static let fps = 15
+    static let label = "용량 최적화 · \(pixels)px · 최대 \(fps)fps"
     static func bytes(_ url: URL) throws -> Int64 {
         let fm = FileManager.default
         let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
@@ -40,7 +34,7 @@ nonisolated enum StickerStorageOptimizer {
 
 extension LibraryWriter {
     /// No await: publication, deletion, updates and optimization cannot race this transaction.
-    func optimizeStorage(packIDs: Set<String>? = nil, stickerIDs: Set<String>? = nil, profile: StorageOptimizationProfile = .compact, retainOldRevisions: Bool = false, progress: @Sendable (Int, Int) -> Void = { _, _ in }) throws -> StorageOptimizationResult {
+    func optimizeStorage(packIDs: Set<String>? = nil, stickerIDs: Set<String>? = nil, progress: @Sendable (Int, Int) -> Void = { _, _ in }) throws -> StorageOptimizationResult {
         let snapshot = try reader.snapshot()
         guard snapshot.warnings.isEmpty else { throw LibraryError.invalidIndex }
         var result = StorageOptimizationResult()
@@ -71,18 +65,18 @@ extension LibraryWriter {
                     var gif = try sticker.animationPath.map { try reader.file($0) }
                     let oldGIF = gif
                     var quality = sticker.conversionQuality
-                    if eligible && quality?.hasPrefix(profile.label) != true {
+                    if eligible && quality?.hasPrefix(StickerStorageOptimizer.label) != true {
                         let candidate = temporary.appendingPathComponent(sticker.id + ".png")
-                        try StickerStorageOptimizer.png(from: oldPNG, to: candidate, pixels: profile.pixels)
+                        try StickerStorageOptimizer.png(from: oldPNG, to: candidate, pixels: StickerStorageOptimizer.pixels)
                         var smaller = false
                         var keptOriginal = false
                         if try StickerStorageOptimizer.bytes(candidate) < StickerStorageOptimizer.bytes(oldPNG) { png = candidate; smaller = true } else { keptOriginal = true }
                         if let original = gif {
                             let candidateGIF = temporary.appendingPathComponent(sticker.id + ".gif")
-                            try KeyboardPlaybackBuilder.build(from: original, to: candidateGIF, pixels: profile.pixels, fps: profile.fps)
+                            try KeyboardPlaybackBuilder.build(from: original, to: candidateGIF, pixels: StickerStorageOptimizer.pixels, fps: StickerStorageOptimizer.fps)
                             if try StickerStorageOptimizer.bytes(candidateGIF) < StickerStorageOptimizer.bytes(original) { gif = candidateGIF; smaller = true } else { keptOriginal = true }
                         }
-                        if smaller { changed = true; quality = profile.label + (keptOriginal ? " · 일부 원본 유지" : "") }
+                        if smaller { changed = true; quality = StickerStorageOptimizer.label + (keptOriginal ? " · 일부 원본 유지" : "") }
                     }
                     inputs.append(LocalStickerInput(id: sticker.id, name: sticker.name, url: png,
                         sourceFormat: sticker.sourceFormat ?? "png", animationURL: gif, conversionQuality: quality,
@@ -99,7 +93,7 @@ extension LibraryWriter {
                 // Only the replaced revision is disposable; installed assets remain available offline.
                 result.optimizedPacks += 1
                 do {
-                    if !retainOldRevisions { try FileManager.default.removeItem(at: oldDirectory) }
+                    try FileManager.default.removeItem(at: oldDirectory)
                     result.saved += max(0, before - after)
                 } catch {
                     result.failures.append("\(pack.title): 용량 최적화는 완료했지만 이전 파일을 정리하지 못했어요. 캐시 삭제로 다시 정리해 주세요.")

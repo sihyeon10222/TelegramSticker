@@ -87,6 +87,7 @@ extension KeyboardViewController {
             pagingPreview.reloadData()
         }
         updatePlaybackState()
+        applyPendingLibraryIfPossible()
     }
 
     @objc func handlePackSwipe(_ gesture: UIPanGestureRecognizer) {

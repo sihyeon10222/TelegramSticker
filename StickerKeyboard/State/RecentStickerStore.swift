@@ -18,9 +18,9 @@ final class RecentStickerStore {
     @discardableResult
     func reload() -> Bool {
         var seen = Set<String>()
-        let loaded = Array((defaults.stringArray(forKey: key) ?? []).filter {
+        let loaded = (defaults.stringArray(forKey: key) ?? []).filter {
             !$0.isEmpty && $0.utf8.count <= 220 && seen.insert($0).inserted
-        }.prefix(24))
+        }
         guard loaded != ids else { return false }
         ids = loaded
         return true
@@ -31,7 +31,6 @@ final class RecentStickerStore {
         reload()
         ids.removeAll { $0 == id }
         ids.insert(id, at: 0)
-        ids = Array(ids.prefix(24))
         defaults.set(ids, forKey: key)
     }
 

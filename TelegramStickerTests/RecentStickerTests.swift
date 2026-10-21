@@ -4,19 +4,19 @@ import Testing
 
 @MainActor
 struct RecentStickerTests {
-    @Test func boundedHistoryIsUniqueOrderedPersistentAndPrunesDeletedIDs() throws {
+    @Test func historyIsUniqueOrderedPersistentAndPrunesDeletedIDs() throws {
         let suite = "StickerBridgeTests." + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = RecentStickerStore(defaults: defaults)
         #expect(store.ids.isEmpty)
         for i in 0..<30 { store.record("pack.sticker-\(i)") }
-        #expect(store.ids.count == 24)
+        #expect(store.ids.count == 30)
         #expect(store.ids.first == "pack.sticker-29")
-        #expect(!store.ids.contains("pack.sticker-0"))
+        #expect(store.ids.last == "pack.sticker-0")
         store.record("pack.sticker-12")
         #expect(store.ids.first == "pack.sticker-12")
-        #expect(Set(store.ids).count == 24)
+        #expect(Set(store.ids).count == 30)
         let restored = RecentStickerStore(defaults: defaults)
         #expect(restored.ids == store.ids)
         restored.prune(available: ["pack.sticker-12", "pack.sticker-29"])

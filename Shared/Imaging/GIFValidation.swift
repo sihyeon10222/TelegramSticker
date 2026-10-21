@@ -3,7 +3,6 @@ import ImageIO
 import UniformTypeIdentifiers
 
 nonisolated enum GIFValidation {
-    static let maximumBytes = Int.max - 1 // No product storage quota.
     static func isValid(_ data: Data) -> Bool {
         guard validHeader(data), data.count >= 14, data.last == 0x3b else { return false }
         return validate(CGImageSourceCreateWithData(data as CFData, nil))

@@ -87,12 +87,12 @@ actor ImportJobCache {
         }
     }
 
-    func optimize(root: URL, writer: LibraryWriter, packIDs: Set<String>? = nil, stickerIDs: Set<String>? = nil, profile: StorageOptimizationProfile = .compact, progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) async throws -> StorageOptimizationResult {
+    func optimize(root: URL, writer: LibraryWriter, packIDs: Set<String>? = nil, stickerIDs: Set<String>? = nil, progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) async throws -> StorageOptimizationResult {
         let key = root.standardizedFileURL.path
         guard !activeRoots.contains(key) else { throw StickerImportError.importInProgress }
         activeRoots.insert(key)
         defer { activeRoots.remove(key) }
-        var result = try await writer.optimizeStorage(packIDs: packIDs, stickerIDs: stickerIDs, profile: profile, progress: progress)
+        var result = try await writer.optimizeStorage(packIDs: packIDs, stickerIDs: stickerIDs, progress: progress)
         do { try await clearLeased(root: root, writer: writer, preserving: []) }
         catch { result.failures.append("용량 최적화는 반영했지만 일부 캐시 정리에 실패했어요: " + error.localizedDescription) }
         return result

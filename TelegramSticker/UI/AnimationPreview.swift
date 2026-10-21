@@ -29,20 +29,17 @@ struct StickerLargePreview: UIViewRepresentable {
             coordinator.task?.cancel()
             coordinator.sticker = sticker
             coordinator.pixels = pixels
-            coordinator.animationConfigured = false
             view.accessibilityLabel = sticker.name
-            view.configure(url: nil, poster: coordinator.images.cachedThumbnail(for: sticker, pixels: pixels), pixels: pixels)
+            // Configure playback immediately. Poster loading and GIF preparation are
+            // independent, so neither scrolling nor a later SwiftUI update starts it.
+            view.configure(url: sticker.animationURL,
+                poster: coordinator.images.cachedThumbnail(for: sticker, pixels: pixels),
+                pixels: pixels, repeatForever: true)
             coordinator.task = Task { @MainActor [weak view] in
                 let poster = await coordinator.images.thumbnailAsync(for: sticker, pixels: pixels)
                 guard !Task.isCancelled else { return }
                 view?.setPoster(poster ?? UIImage(systemName: "exclamationmark.triangle"))
             }
-        }
-        // Newly arriving cells need only a poster while scrolling. Keep the current
-        // frame on already configured cells and resume their timeline when idle.
-        if !paused, !coordinator.animationConfigured {
-            coordinator.animationConfigured = true
-            view.configure(url: sticker.animationURL, poster: view.image, pixels: pixels, repeatForever: true)
         }
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -50,13 +47,7 @@ struct StickerLargePreview: UIViewRepresentable {
         let images = StickerImages()
         var sticker: Sticker?
         var pixels: Int?
-        var animationConfigured = false
         var task: Task<Void, Never>?
     }
     static func dismantleUIView(_ view: GIFPlaybackView, coordinator: Coordinator) { coordinator.task?.cancel(); view.stop() }
-}
-
-struct AnimationPreview: View {
-    let sticker: Sticker
-    var body: some View { StickerLargePreview(sticker: sticker).frame(height: 240).padding() }
 }
