@@ -169,17 +169,20 @@ nonisolated struct LibraryReader: Sendable {
     }
 }
 
-/// Each process keeps its own read-only cache. Filesystem validation never runs on MainActor.
+/// Each process keeps its own read-only cache for asynchronous refreshes.
+/// The keyboard can supply its validated first-presentation read to avoid a
+/// second full file walk when the index still describes the same publication.
 actor LibrarySnapshotLoader {
     static let shared = LibrarySnapshotLoader()
     private var cached: LibraryContents?
 
-    func loadShared(force: Bool = false) throws -> LibraryContents {
-        try load(reader: LibraryReader.shared(), force: force)
+    func loadShared(force: Bool = false, reusing initial: LibraryContents? = nil) throws -> LibraryContents {
+        try load(reader: LibraryReader.shared(), force: force, reusing: initial)
     }
 
-    func load(reader: LibraryReader, force: Bool = false) throws -> LibraryContents {
-        let contents = try reader.contents(reusing: force ? nil : cached)
+    func load(reader: LibraryReader, force: Bool = false, reusing initial: LibraryContents? = nil) throws -> LibraryContents {
+        let previous = initial?.reader.root == reader.root ? initial : cached
+        let contents = try reader.contents(reusing: force ? nil : previous)
         cached = contents
         return contents
     }

@@ -1,5 +1,17 @@
 # 키보드 표시·재진입 안정화 (2026-10-14)
 
+## 2026-10-22 상단 여백 두 상태 재확인 — 미해결
+
+첫 진입의 로딩 페이지 교체 경로를 수정한 이후에도 사용자는 시스템 한글·영어·스티커 키보드 왕복 시 팩 줄 위의 여백이 두 상태로 표시된다고 보고했다. 이번에는 사용자 지침에 따라 테스트·수동 재현을 실행하지 않고 현재 소스·기존 측정 기록·공개 SDK를 대조했다.
+
+- 현재 `StickerKeyboard/KeyboardViewController.swift`는 콘텐츠 상단을 루트 `view.topAnchor + 4pt`에 고정한다. 내부 상단 여백을 진입·선택에 따라 0/17pt로 바꾸는 분기는 없다. `needsInputModeSwitchKey`에 따른 32/44pt 팩 줄 높이 차이는 전환 버튼의 최소 터치 영역이며 루트 바깥의 여백과 구분한다.
+- 위의 사용자 설명은 아래 10월 14일 기기 기록의 확장 루트 바깥 17pt 변화와 일치한다. 현재 빌드에서 외부 여백을 새로 측정해 원인을 확정한 것은 아니다.
+- 설치된 iOS 27.1 SDK의 공개 `UIInputViewController.h`·`UIInputView.h`와 [Apple 키보드 레이아웃 문서](https://developer.apple.com/documentation/uikit/configuring-a-custom-keyboard-interface)를 확인했다. 확장 primary view의 높이 조절은 제공하지만 호스트의 상단 inset을 고정·초기화하는 API는 확인하지 못했다.
+- [동일 현상의 개발자 측정 보고](https://developer.apple.com/forums/thread/843093)는 이전 시스템 키보드에 따른 17pt 차이, 확장 bounds·safe area 불변, 높이·스타일·self sizing 변경으로 해결되지 않는 사례를 설명한다. Apple의 수정 보장이나 공식 우회책으로 해석하지 않는다.
+- 이미 실패한 높이 재요청·fitting override·임의 음수 여백 보정을 반복하지 않는다. 확장 내부 배치가 일정한 사실을 시스템 배경 상단까지 일정해졌다는 증거로 삼지 않는다.
+
+앱 코드·프로젝트 설정·저장 데이터는 변경하지 않았다. 새 빌드·설치·테스트는 실행하지 않았으며 이 항목은 미해결이다. 이전 첫 진입 로딩 수정의 빌드·설치 결과와 이번 외부 여백 문제의 해결 여부를 구분한다.
+
 ## 2026-10-17 기본 높이 전환 회귀 복구
 
 사용자 사진에서 기본 높이 전환 이후 팩 줄만 표시되고 스티커 viewport가 접힌 것을 확인했다. UICollectionView의 콘텐츠는 intrinsic height를 제공하지 않으므로 상하단을 연결하는 것만으로 충분한 키보드 높이가 보장되지 않는다. 기본 높이에 맡기는 직전 변경을 철회하고 원래의 UIInputView(.keyboard)·allowsSelfSizing 및 루트 높이 제약(세로 240pt·가로 200pt·접근성 380pt, 우선순위 999)을 복구한다.

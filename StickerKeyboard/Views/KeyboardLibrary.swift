@@ -10,7 +10,7 @@ extension KeyboardViewController {
 
     func renderSelection() {
         state.prepareSelection()
-        emptyLabel.text = state.libraryNote ?? (state.libraryRevision == nil ? "스티커를 불러오는 중…" : state.selection == .recent
+        emptyLabel.text = state.libraryNote ?? (state.selection == .recent
             ? "최근 사용한 스티커가 없어요. 전체에서 스티커를 복사해 보세요."
             : "설치한 스티커가 없어요. 앱에서 Telegram 팩을 추가해 주세요.")
         emptyLabel.isHidden = state.stickerCount > 0

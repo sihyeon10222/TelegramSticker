@@ -50,6 +50,7 @@ final class KeyboardViewController: UIInputViewController,
     var moreWidth: NSLayoutConstraint?
     let outerInset: CGFloat = 4
     var pendingScrollRestoration = false
+    var firstPresentationPrepared = false
     var committingPage = false
     var collectionView = UICollectionView(frame: .zero,
                                                   collectionViewLayout: StickerGridLayout())
@@ -245,6 +246,12 @@ final class KeyboardViewController: UIInputViewController,
             (controller: KeyboardViewController, _: UITraitCollection) in
             controller.updateContentMetrics()
         }
+        // Build the actual selected library before UIKit measures/presents the
+        // hierarchy. A cold process must not first publish the empty loading UI.
+        state.applyAppResetIfNeeded()
+        state.reloadPreferences()
+        restoreInitialLibrary()
+        pendingScrollRestoration = true
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -256,7 +263,8 @@ final class KeyboardViewController: UIInputViewController,
         loadTask = nil
         pendingLibrary = nil
         copyTask?.cancel()
-        // Restore prepared memory immediately; disk changes arrive asynchronously.
+        // Restore the selected library before presentation; subsequent disk
+        // changes arrive asynchronously without replacing unchanged content.
         // A retained controller may be older than another controller in this process.
         UIView.performWithoutAnimation {
             cancelPaging()
@@ -275,6 +283,8 @@ final class KeyboardViewController: UIInputViewController,
             view.layoutIfNeeded()
             collectionView.layoutIfNeeded()
             restoreScrollPositionIfNeeded()
+            revealSelectedTabIfNeeded()
+            prepareFirstPresentationPosters()
             prepareVisibleTabPosters()
         }
         playbackSuspended = false
@@ -295,6 +305,7 @@ final class KeyboardViewController: UIInputViewController,
         super.viewDidLayoutSubviews()
         restoreScrollPositionIfNeeded()
         revealSelectedTabIfNeeded()
+        if presentationActive { prepareFirstPresentationPosters() }
         prepareVisibleTabPosters()
     }
 

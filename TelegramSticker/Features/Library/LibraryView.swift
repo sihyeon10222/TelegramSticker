@@ -17,8 +17,6 @@ struct LibraryView: View {
     @State private var editMode = EditMode.inactive
     @State private var bulkSelected = Set<String>()
     @State private var selectionOptimizationPending = false
-    @State private var sharedSelectionFile: URL?
-    @State private var sharingSelection = false
     @State private var optimizationRequest: OptimizationRequest?
     @State private var confirmBulkDelete = false
     @State private var sharing = false
@@ -340,7 +338,8 @@ struct LibraryView: View {
                         packNavigationRow(pack)
                         .tag(pack.id)
                         .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
-                        .moveDisabled(model.isBusy || !model.damagedPacks.isEmpty || ImportActivity.shared.count > 0)
+                        // Editing is for bulk selection; keep reordering in normal mode.
+                        .moveDisabled(editMode.isEditing || model.isBusy || !model.damagedPacks.isEmpty || ImportActivity.shared.count > 0)
                         .accessibilityIdentifier("pack.\(pack.id)")
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             Button("업데이트 확인", systemImage: "arrow.clockwise") { updatePack(pack) }
@@ -357,7 +356,7 @@ struct LibraryView: View {
                         }
                     }
                     .onMove { source, destination in
-                        guard !model.isBusy, model.damagedPacks.isEmpty,
+                        guard !editMode.isEditing, !model.isBusy, model.damagedPacks.isEmpty,
                               ImportActivity.shared.count == 0 else { return }
                         Task { await model.move(from: source, to: destination) }
                     }
@@ -402,21 +401,9 @@ struct LibraryView: View {
                     Group {
                         if sharing {
                             let links = PackLinkList.links(for: model.packs.filter { bulkSelected.contains($0.id) })
-                            Button {
-                                do {
-                                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-                                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                                    let file = directory.appendingPathComponent("LinkList.stickerlinks")
-                                    sharedSelectionFile = file
-                                    try Data(links.joined(separator: "\n").utf8).write(to: file, options: .atomic)
-                                    sharingSelection = true
-                                } catch {
-                                    if let file = sharedSelectionFile { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
-                                    sharedSelectionFile = nil
-                                    model.message = error.localizedDescription
-                                }
-                            } label: { Label("선택한 팩 공유", systemImage: "square.and.arrow.up") }
-                            .disabled(links.isEmpty)
+                            PackLinksShareButton(links: links, onCompleted: {
+                                SelectionControls.update { resetSelection() }
+                            }, onFailure: { model.message = $0.localizedDescription })
                             .appGlassButton(prominent: true).controlSize(.large).padding(12)
                         } else { packEditingActions() }
                     }
@@ -465,7 +452,12 @@ struct LibraryView: View {
             }
             .overlay { if model.isBusy { ProgressView("저장 중") } }
             .refreshable { await refreshUpdates() }
-            .navigationSplitViewColumnWidth(min: sidebarMinimum, ideal: sidebarMinimum, max: sidebarMaximum)
+            .modifier(LibrarySidebarWidth(
+                containerSize: geometry.size,
+                minimum: sidebarMinimum,
+                maximum: sidebarMaximum,
+                isExpanded: wideLayout && columnVisibility != .detailOnly && activeTab == .library
+            ))
             .overlay(alignment: .trailing) {
                 if wideLayout {
                     Rectangle().fill(Color(uiColor: .separator))
@@ -510,16 +502,6 @@ struct LibraryView: View {
             selected = nil
         }
         .onChange(of: PackLinkInbox.shared.received?.id) { _, received in if received == nil { Task { await model.refresh() } } }
-        .sheet(isPresented: $sharingSelection, onDismiss: {
-            if let file = sharedSelectionFile { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
-            sharedSelectionFile = nil
-        }) {
-            if let file = sharedSelectionFile {
-                PackTextShareSheet(text: "", fileURL: file, onCompleted: {
-                    SelectionControls.update { resetSelection() }
-                })
-            }
-        }
         .sheet(item: $sharingPack) { pack in PackTextShareSheet(text: PackLinkList.links(for: [pack]).joined(separator: "\n")) }
         .sheet(item: $importRequest, onDismiss: { Task { await model.refresh() } }) { request in
             if let writer = model.writer { ImportView(writer: writer, initialPackName: request.name, updating: request.updating, initialLinks: request.links, initialPackTitle: request.title) }

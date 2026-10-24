@@ -18,15 +18,47 @@ extension KeyboardViewController {
     }
 
     func acceptLibrary(_ contents: LibraryContents) {
+        let previousSelection = state.selection
+        let previousOffset = Double(collectionView.contentOffset.y)
+        let shouldSaveOffset = state.libraryRevision != nil && !pendingScrollRestoration
+        let changed = state.acceptLibrary(contents)
+        // The first off-main check usually confirms the library already shown.
+        // Keep its cells, GIF playback and scroll position intact in that case.
+        guard changed else { return }
         // An initial loading surface has no meaningful offset to persist.
-        if state.libraryRevision != nil, !pendingScrollRestoration {
-            state.saveScrollOffset(Double(collectionView.contentOffset.y))
+        if shouldSaveOffset {
+            state.saveScrollOffset(previousOffset, for: previousSelection)
         }
-        state.acceptLibrary(contents)
         updateCacheGeneration(state.cacheGeneration)
         applySelection()
         pendingScrollRestoration = true
         restoreScrollPositionIfNeeded()
+    }
+
+    func prepareFirstPresentationPosters() {
+        guard !firstPresentationPrepared, state.libraryRevision != nil,
+              collectionView.bounds.width > 0, collectionView.bounds.height >= 44 else { return }
+        // Only the visible, already-small PNG posters are decoded here. GIF
+        // timelines and every offscreen image retain their asynchronous path.
+        let paths = collectionView.indexPathsForVisibleItems.sorted().prefix(64)
+        guard !paths.isEmpty || state.stickerCount == 0 else { return }
+        firstPresentationPrepared = true
+        let stickers = paths.compactMap { sticker(at: $0, in: collectionView) }
+        images.preparePosters(for: stickers, limit: 64)
+        for path in paths {
+            guard let cell = collectionView.cellForItem(at: path) as? StickerCell,
+                  let sticker = sticker(at: path, in: collectionView) else { continue }
+            cell.setPoster(images.cachedThumbnail(for: sticker))
+        }
+        for button in packTabs.arrangedSubviews.compactMap({ $0 as? PackTabButton })
+            .filter({ $0.convert($0.bounds, to: tabScroll).intersects(tabScroll.bounds) }).prefix(24) {
+            guard !button.posterReady, let id = button.packID,
+                  let cover = state.prepared[id]?.first,
+                  let poster = images.thumbnail(for: cover, pixels: 22) else { continue }
+            button.posterTask?.cancel(); button.posterTask = nil
+            button.configuration?.image = poster.withRenderingMode(.alwaysOriginal)
+            button.posterReady = true
+        }
     }
 
     func prepareVisibleTabPosters() {
@@ -73,9 +105,10 @@ extension KeyboardViewController {
         loadGeneration += 1
         pendingLibrary = nil
         let generation = loadGeneration
+        let initialLibrary = state.libraryForReload
         loadTask = Task { [weak self] in
             let result: Result<LibraryContents, Error>
-            do { result = .success(try await LibrarySnapshotLoader.shared.loadShared(force: force)) }
+            do { result = .success(try await LibrarySnapshotLoader.shared.loadShared(force: force, reusing: initialLibrary)) }
             catch { result = .failure(error) }
             guard let self else { return }
             defer { if self.loadGeneration == generation { self.loadTask = nil } }

@@ -31,6 +31,7 @@ final class KeyboardState {
     private(set) var selectedSections: [[Sticker]] = []
     private(set) var stickerCount = 0
     var hasRecentStickers: Bool { !recent.ids.isEmpty }
+    var libraryForReload: LibraryContents? { Self.cachedLibrary }
 
     func shouldInvalidateImageCache(for generation: String?) -> Bool {
         let previous = Self.imageCacheGeneration
@@ -46,9 +47,9 @@ final class KeyboardState {
         }
     }
 
-    func saveScrollOffset(_ offset: Double) {
+    func saveScrollOffset(_ offset: Double, for selection: KeyboardSelection? = nil) {
         guard offset.isFinite else { return }
-        UserDefaults.standard.set(max(0, offset), forKey: scrollKey(for: selection))
+        UserDefaults.standard.set(max(0, offset), forKey: scrollKey(for: selection ?? self.selection))
     }
 
     func scrollOffset(for selection: KeyboardSelection) -> Double {
@@ -79,15 +80,39 @@ final class KeyboardState {
 
     @discardableResult
     func restoreLibrary() -> Bool {
-        guard let cached = Self.cachedLibrary,
-              cached.snapshot.revision != libraryRevision || cached.snapshot.cacheGeneration != cacheGeneration else { return false }
-        acceptLibrary(cached, allowPruning: false)
-        return true
+        let contents: LibraryContents
+        let allowPruning: Bool
+        if let cached = Self.cachedLibrary {
+            contents = cached
+            allowPruning = false
+        } else {
+            // A new extension process has no prepared memory. Finish the local,
+            // validated read before its first UI is presented, rather than showing
+            // an empty tab strip/loading page and replacing it after appearance.
+            // Later appearances reuse memory and check for changes off-main.
+            do { contents = try LibraryReader.shared().contents() }
+            catch { reportReloadFailure(); return false }
+            allowPruning = true
+        }
+        guard libraryRevision != contents.snapshot.revision || cacheGeneration != contents.snapshot.cacheGeneration
+                || libraryNote != note(for: contents.snapshot) else { return false }
+        return acceptLibrary(contents, allowPruning: allowPruning)
     }
 
-    func acceptLibrary(_ contents: LibraryContents, allowPruning: Bool = true) {
+    private func note(for snapshot: LibrarySnapshot) -> String? {
+        snapshot.warnings.first ?? (snapshot.packs.isEmpty
+            ? "설치한 스티커가 없어요. 앱에서 Telegram 팩을 추가해 주세요." : nil)
+    }
+
+    @discardableResult
+    func acceptLibrary(_ contents: LibraryContents, allowPruning: Bool = true) -> Bool {
         let snapshot = contents.snapshot
+        let note = note(for: snapshot)
         let changed = libraryRevision != snapshot.revision || cacheGeneration != snapshot.cacheGeneration
+        let noteChanged = libraryNote != note
+        let previousSelection = selection
+        let previousRecent = recent.ids
+        let previousTabsRevision = tabsRevision
         Self.cachedLibrary = contents
         reader = contents.reader
         libraryRevision = snapshot.revision
@@ -100,8 +125,9 @@ final class KeyboardState {
         let previousOrder = packs.map(\.id)
         restorePackOrder()
         if changed, previousOrder == packs.map(\.id) { rebuildSections() }
-        libraryNote = snapshot.warnings.first
-        if packs.isEmpty { libraryNote = snapshot.warnings.first ?? "설치한 스티커가 없어요. 앱에서 Telegram 팩을 추가해 주세요." }
+        libraryNote = note
+        return changed || noteChanged || selection != previousSelection || recent.ids != previousRecent
+            || tabsRevision != previousTabsRevision
     }
 
     private func rebuildSections() {

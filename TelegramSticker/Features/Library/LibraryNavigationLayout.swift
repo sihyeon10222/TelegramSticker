@@ -1,6 +1,46 @@
 import SwiftUI
 import UIKit
 
+/// Persist the expanded column's width without saving compact or window-resize layouts.
+struct LibrarySidebarWidth: ViewModifier {
+    let containerSize: CGSize
+    let minimum: CGFloat
+    let maximum: CGFloat
+    let isExpanded: Bool
+    @AppStorage("library.sidebar.width.v1") private var savedWidth = 0.0
+
+    private var preferredWidth: CGFloat {
+        guard savedWidth.isFinite, savedWidth > 0 else { return minimum }
+        return min(maximum, max(minimum, CGFloat(savedWidth)))
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .navigationSplitViewColumnWidth(min: minimum, ideal: preferredWidth, max: maximum)
+            .onGeometryChange(for: Measurement.self) { geometry in
+                Measurement(width: geometry.size.width, containerSize: containerSize, isExpanded: isExpanded)
+            } action: { previous, current in
+                guard previous.isExpanded, current.isExpanded,
+                      previous.containerSize == current.containerSize,
+                      maximum > minimum,
+                      current.width.isFinite,
+                      current.width >= minimum - 0.5, current.width <= maximum + 0.5,
+                      abs(current.width - previous.width) > 0.5 else { return }
+                let width = min(maximum, max(minimum, current.width))
+                // A restored width can be temporarily clamped by a smaller
+                // window. Keep the original preference until the user resizes.
+                guard abs(width - preferredWidth) > 0.5 else { return }
+                savedWidth = Double(width)
+            }
+    }
+
+    private nonisolated struct Measurement: Equatable, Sendable {
+        let width: CGFloat
+        let containerSize: CGSize
+        let isExpanded: Bool
+    }
+}
+
 /// Reassert expansion after UIKit finishes its compact-to-split transition.
 struct LibraryRotationObserver: UIViewControllerRepresentable {
     let openSidebar: () -> Void

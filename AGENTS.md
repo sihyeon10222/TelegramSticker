@@ -10,6 +10,14 @@
 - Automatically build the app after making app changes and fix build errors before finishing.
 - Do not run tests unless the user explicitly asks for them.
 
+# Versioning preferences
+
+- Every app or keyboard code, resource, or project-setting change must increase both `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` before building and installing the updated app. Use the next patch version for routine changes (for example, `1.0.1` → `1.0.2`) and increment the build number by one. Do not decrease either value.
+- Keep Debug/Release and all app, keyboard extension, and Mac desktop bundle versions identical. Version settings are inherited from the project-level build configurations in `TelegramSticker.xcodeproj/project.pbxproj`; do not add target-level overrides.
+- Increment once for a completed change, not once per device/platform or repeated build of the same change. Documentation-only edits do not require a version increment.
+- Settings must display `CFBundleShortVersionString` and `CFBundleVersion` from the installed app bundle, never a hard-coded version label.
+- Version and build-number values must contain only digits and dots. Display the app version and build number as separate values in Settings.
+
 # Project structure
 
 - Before working, read [File-structure.md](File-structure.md) at the repository root to identify current file locations, responsibilities, and target boundaries.
