@@ -1,8 +1,31 @@
 import UIKit
+import os
 
 extension KeyboardViewController {
+    func beginPresentationPreparation() {
+        guard !preparingPresentation else { return }
+        preparingPresentation = true
+        let cachedLibrary = state.libraryForReload != nil
+        firstPosterInterval = performance.beginInterval("Keyboard First Poster", id: performance.makeSignpostID(),
+            "cachedLibrary=\(cachedLibrary)")
+    }
+
+    func finishFirstPosterMeasurement(outcome: String) {
+        guard let interval = firstPosterInterval else { return }
+        performance.endInterval("Keyboard First Poster", interval, "outcome=\(outcome, privacy: .public)")
+        firstPosterInterval = nil
+    }
+
+    func recordFirstPoster(in cell: StickerCell) {
+        guard firstPosterInterval != nil, presentationActive, cell.hasDisplayedImage,
+              collectionView.visibleCells.contains(where: { $0 === cell }) else { return }
+        finishFirstPosterMeasurement(outcome: "visibleCellImageAssigned")
+    }
+
     @discardableResult
     func restoreInitialLibrary() -> Bool {
+        let interval = performance.beginInterval("Initial Library Restore", id: performance.makeSignpostID())
+        defer { performance.endInterval("Initial Library Restore", interval) }
         let restored = state.restoreLibrary()
         updateCacheGeneration(state.cacheGeneration)
         if restored || state.libraryRevision == nil { applySelection() }
@@ -31,25 +54,37 @@ extension KeyboardViewController {
         }
         updateCacheGeneration(state.cacheGeneration)
         applySelection()
+        if state.stickerCount == 0 { finishFirstPosterMeasurement(outcome: "emptySelection") }
         pendingScrollRestoration = true
         restoreScrollPositionIfNeeded()
     }
 
     func prepareFirstPresentationPosters() {
-        guard !firstPresentationPrepared, state.libraryRevision != nil,
+        guard preparingPresentation, state.libraryRevision != nil,
               collectionView.bounds.width > 0, collectionView.bounds.height >= 44 else { return }
-        // Only the visible, already-small PNG posters are decoded here. GIF
-        // timelines and every offscreen image retain their asynchronous path.
+        // Repeat for the actual viewport until appearance completes: restoration
+        // and host layout can replace the first set of cells. On later appearances
+        // NSCache may have evicted posters even while the library stays in memory.
         let paths = collectionView.indexPathsForVisibleItems.sorted().prefix(64)
         guard !paths.isEmpty || state.stickerCount == 0 else { return }
-        firstPresentationPrepared = true
-        let stickers = paths.compactMap { sticker(at: $0, in: collectionView) }
-        images.preparePosters(for: stickers, limit: 64)
+        let interval = performance.beginInterval("Presentation Posters", id: performance.makeSignpostID())
+        defer { performance.endInterval("Presentation Posters", interval) }
+        let missingPosters = paths.compactMap { path -> Sticker? in
+            guard let cell = collectionView.cellForItem(at: path) as? StickerCell,
+                  !cell.hasDisplayedImage else { return nil }
+            return sticker(at: path, in: collectionView)
+        }
+        images.preparePosters(for: missingPosters, limit: 64)
         for path in paths {
             guard let cell = collectionView.cellForItem(at: path) as? StickerCell,
                   let sticker = sticker(at: path, in: collectionView) else { continue }
-            cell.setPoster(images.cachedThumbnail(for: sticker))
+            if !cell.hasDisplayedImage, let poster = images.cachedThumbnail(for: sticker) {
+                cell.imageTask?.cancel(); cell.imageTask = nil
+                cell.setPoster(poster)
+            }
+            recordFirstPoster(in: cell)
         }
+        if state.stickerCount == 0 { finishFirstPosterMeasurement(outcome: "emptySelection") }
         for button in packTabs.arrangedSubviews.compactMap({ $0 as? PackTabButton })
             .filter({ $0.convert($0.bounds, to: tabScroll).intersects(tabScroll.bounds) }).prefix(24) {
             guard !button.posterReady, let id = button.packID,
@@ -121,6 +156,7 @@ extension KeyboardViewController {
             case .failure:
                 self.state.reportReloadFailure()
                 if self.state.libraryRevision == nil { self.applySelection() }
+                self.finishFirstPosterMeasurement(outcome: "libraryReadFailed")
                 self.showMessage(preservingStatus ?? self.state.libraryNote!, persistent: persistentStatus)
             }
         }

@@ -50,7 +50,8 @@ final class KeyboardViewController: UIInputViewController,
     var moreWidth: NSLayoutConstraint?
     let outerInset: CGFloat = 4
     var pendingScrollRestoration = false
-    var firstPresentationPrepared = false
+    var preparingPresentation = false
+    var firstPosterInterval: OSSignpostIntervalState?
     var committingPage = false
     var collectionView = UICollectionView(frame: .zero,
                                                   collectionViewLayout: StickerGridLayout())
@@ -62,6 +63,7 @@ final class KeyboardViewController: UIInputViewController,
     var keyboardHeight: NSLayoutConstraint?
 
     override func loadView() {
+        beginPresentationPreparation()
         let requestedHeight = preferredKeyboardHeight
         let keyboard = UIInputView(
             frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: requestedHeight),
@@ -256,6 +258,7 @@ final class KeyboardViewController: UIInputViewController,
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        beginPresentationPreparation()
         state.applyAppResetIfNeeded()
         presentationActive = true
         loadGeneration += 1
@@ -292,6 +295,12 @@ final class KeyboardViewController: UIInputViewController,
         reloadLibrary()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        prepareFirstPresentationPosters()
+        preparingPresentation = false
+    }
+
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         if keyboardHeight?.constant != preferredKeyboardHeight {
@@ -316,6 +325,8 @@ final class KeyboardViewController: UIInputViewController,
         collectionView.layoutIfNeeded()
         let maximum = max(0, collectionView.contentSize.height - collectionView.bounds.height)
         collectionView.setContentOffset(CGPoint(x: 0, y: min(CGFloat(state.scrollOffset(for: state.selection)), maximum)), animated: false)
+        // Realize the restored viewport before choosing which posters to prepare.
+        collectionView.layoutIfNeeded()
     }
 
     func revealSelectedTabIfNeeded() {
@@ -360,6 +371,8 @@ final class KeyboardViewController: UIInputViewController,
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        preparingPresentation = false
+        finishFirstPosterMeasurement(outcome: "disappearedBeforePoster")
         presentationActive = false
         pendingLibrary = nil
         cancelPaging()

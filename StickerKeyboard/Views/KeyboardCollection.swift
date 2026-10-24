@@ -56,6 +56,7 @@ extension KeyboardViewController {
                 let image = await self.images.thumbnailAsync(for: sticker)
                 guard let stickerCell, !Task.isCancelled, stickerCell.imageToken == token else { return }
                 stickerCell.setPoster(image)
+                self.recordFirstPoster(in: stickerCell)
             }
         }
         return cell
@@ -70,6 +71,7 @@ extension KeyboardViewController {
     }
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         (cell as? StickerCell)?.resumePlayback()
+        if let cell = cell as? StickerCell { recordFirstPoster(in: cell) }
         if let cell = cell as? StickerCell, cell.imageTask == nil, let sticker = sticker(at: indexPath, in: collectionView) {
             let token = cell.imageToken
             cell.imageTask = Task { @MainActor [weak self, weak cell] in
@@ -77,6 +79,7 @@ extension KeyboardViewController {
                 let image = await self.images.thumbnailAsync(for: sticker)
                 guard let cell, !Task.isCancelled, cell.imageToken == token else { return }
                 cell.setPoster(image)
+                self.recordFirstPoster(in: cell)
             }
         }
         (cell as? StickerCell)?.setPlaybackPaused(playbackSuspended)
@@ -95,7 +98,7 @@ extension KeyboardViewController {
 
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath,
                         point: CGPoint) -> UIContextMenuConfiguration? {
-        guard collectionView === self.collectionView, let sticker = sticker(at: indexPath, in: collectionView), sticker.animationURL != nil else { return nil }
+        guard collectionView === self.collectionView, let sticker = sticker(at: indexPath, in: collectionView), sticker.isAnimated else { return nil }
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             UIMenu(children: [UIAction(title: "GIF로 복사", image: UIImage(systemName: "play.rectangle")) { _ in
                 self?.copySticker(sticker)

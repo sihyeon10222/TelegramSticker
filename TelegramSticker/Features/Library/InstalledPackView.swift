@@ -134,7 +134,7 @@ struct InstalledPackView: View {
                                 }
                             }
                             .overlay(alignment: .bottomTrailing) {
-                                if sticker.animationURL != nil {
+                                if sticker.isAnimated {
                                     Text("GIF").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
                                         .padding(.horizontal, 4).padding(.vertical, 2)
                                         .background(.background, in: Capsule()).padding(3)
@@ -161,7 +161,7 @@ struct InstalledPackView: View {
                                 copy(sticker)
                             }
                         }
-                        .accessibilityLabel(sticker.animationURL == nil ? sticker.name : "\(sticker.name), 애니메이션")
+                        .accessibilityLabel(!sticker.isAnimated ? sticker.name : "\(sticker.name), 애니메이션")
                         .accessibilityHint(selecting ? "탭하면 선택하거나 해제해요." : "탭하면 바로 복사해요. 길게 누르거나 우클릭하면 복사, 공유, 용량 최적화와 삭제 옵션을 열 수 있어요.")
                         .accessibilityAddTraits(.isButton)
                         .accessibilityAddTraits(selecting && selectedStickers.contains(sticker.id) ? .isSelected : [])
@@ -171,8 +171,8 @@ struct InstalledPackView: View {
                                 Text("저장 용량 \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))")
                             }
                             Button("복사", systemImage: "doc.on.doc") { copy(sticker) }
-                            if sticker.animationURL != nil { Button("PNG로 복사", systemImage: "photo") { copy(sticker, asPNG: true) } }
-                            Button("공유", systemImage: "square.and.arrow.up") { share(sticker, animated: sticker.animationURL != nil) }
+                            if sticker.isAnimated { Button("PNG로 복사", systemImage: "photo") { copy(sticker, asPNG: true) } }
+                            Button("공유", systemImage: "square.and.arrow.up") { share(sticker, animated: sticker.isAnimated) }
                             Button("용량 최적화", systemImage: "slider.horizontal.3") { optimize([sticker.id]) }
                                 .disabled(ImportActivity.shared.count > 0)
                             Button("삭제", systemImage: "trash", role: .destructive) {

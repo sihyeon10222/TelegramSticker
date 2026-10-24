@@ -19,6 +19,7 @@ final class KeyboardState {
     private let packOrder = KeyboardPackOrderStore()
     private static var imageCacheGeneration: String?
     private static var cachedLibrary: LibraryContents?
+    private static var attemptedInitialRead = false
     private var allSections: [[Sticker]] = []
     private var allStickerCount = 0
     private var contentVersion = 0
@@ -86,10 +87,13 @@ final class KeyboardState {
             contents = cached
             allowPruning = false
         } else {
-            // A new extension process has no prepared memory. Finish the local,
-            // validated read before its first UI is presented, rather than showing
-            // an empty tab strip/loading page and replacing it after appearance.
-            // Later appearances reuse memory and check for changes off-main.
+            // A failed first read must fall back to reloadLibrary's off-main
+            // retry, including when viewWillAppear follows viewDidLoad.
+            guard !Self.attemptedInitialRead else { reportReloadFailure(); return false }
+            Self.attemptedInitialRead = true
+            // Restore metadata before presentation without scanning every asset.
+            // Sticker validates only the files requested by the visible UI/copy.
+            // Later appearances reuse memory and check publications off-main.
             do { contents = try LibraryReader.shared().contents() }
             catch { reportReloadFailure(); return false }
             allowPruning = true

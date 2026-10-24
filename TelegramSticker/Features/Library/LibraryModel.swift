@@ -24,6 +24,11 @@ final class LibraryModel {
             writer = initialWriter ?? (initialReader == nil ? LibraryWriter.shared : nil)
             isAvailable = true
             if let cached = Self.cachedContents, cached.reader.root == reader.root { apply(cached) }
+            else {
+                // Restore installed metadata before the first SwiftUI frame.
+                // This never scans PNG/GIF files or waits for maintenance/network.
+                apply(try reader.contents())
+            }
         } catch { message = error.localizedDescription; isLoading = false }
     }
 
@@ -36,7 +41,7 @@ final class LibraryModel {
             repeat {
                 refreshRequested = false
                 do {
-                    let value = try await LibrarySnapshotLoader.shared.load(reader: reader)
+                    let value = try await LibrarySnapshotLoader.shared.load(reader: reader, reusing: contents)
                     // A publication during this read requires a new index check before presentation.
                     if !refreshRequested { apply(value) }
                 } catch {

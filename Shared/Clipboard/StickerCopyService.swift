@@ -61,11 +61,13 @@ struct StickerCopyService {
     }
 
     func copy(_ sticker: Sticker, isAllowed: Bool, asPNG: Bool = false) -> StickerCopyResult {
-        guard !asPNG, let url = sticker.animationURL else {
+        // Installed URL access now performs path validation. Gate it as well as
+        // the subsequent read/write behind the keyboard's Full Access check.
+        guard isAllowed else { return .fullAccessRequired }
+        guard !asPNG, sticker.isAnimated else {
             return copyPNG(at: sticker.fileURL(), isAllowed: isAllowed)
         }
-        guard isAllowed else { return .fullAccessRequired }
-        guard url.isFileURL else { return .fileUnavailable }
+        guard let url = sticker.animationURL, url.isFileURL else { return .fileUnavailable }
         guard let data = try? loadData(url) else { return .fileUnavailable }
         guard GIFValidation.isValid(data) else { return .invalidPNG }
         do { try writeGIF(data) } catch { return .fileUnavailable }

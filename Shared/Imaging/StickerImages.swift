@@ -22,7 +22,7 @@ final class StickerImages {
     }
 
     private func key(for sticker: Sticker, pixels: Int) -> NSString {
-        "\(sticker.thumbnailURL?.path ?? sticker.imageURL?.path ?? sticker.id):\(pixels)" as NSString
+        "\(sticker.thumbnailIdentity):\(pixels)" as NSString
     }
 
     /// No I/O or decode: safe to use while configuring a cell's first frame.

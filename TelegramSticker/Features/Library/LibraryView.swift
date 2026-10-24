@@ -97,7 +97,7 @@ struct LibraryView: View {
                 if let cover = model.cover(in: pack) {
                     StickerLargePreview(sticker: cover, pixels: 64,
                         paused: activeTab != .library || scenePhase != .active || reduceMotion)
-                        .padding(cover.animationURL == nil ? 6 : 3)
+                        .padding(cover.isAnimated ? 3 : 6)
                 } else { Image(systemName: "square.stack").foregroundStyle(.secondary) }
             }
             .frame(width: 44, height: 44)

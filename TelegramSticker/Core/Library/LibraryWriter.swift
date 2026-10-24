@@ -193,7 +193,9 @@ actor LibraryWriter {
     }
 
     func preparePlaybackFiles() throws {
-        for pack in try reader.snapshot().packs where pack.stickers.contains(where: { $0.animationPath != nil && $0.playbackPath == nil }) {
+        // Discovery needs metadata only; inputs/install validate files for the
+        // legacy packs that actually need conversion.
+        for pack in try reader.snapshot(resolvingFiles: false).packs where pack.stickers.contains(where: { $0.animationPath != nil && $0.playbackPath == nil }) {
             try Task.checkCancellation()
             try install(id: pack.id, title: pack.title, stickers: inputs(for: pack), originalCount: pack.originalCount,
                 telegramName: pack.telegramName, pendingStickerIDs: pack.pendingStickerIDs,

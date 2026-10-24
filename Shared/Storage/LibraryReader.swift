@@ -91,6 +91,8 @@ nonisolated struct LibraryReader: Sendable {
         return try snapshot(index: index, resolvingFiles: resolvingFiles, checkedDirectories: &checkedDirectories)
     }
 
+    /// Presentation reads only the index/manifests. Every asset URL still goes
+    /// through file(_:) when Sticker supplies it to an image decoder or copier.
     func contents(reusing cached: LibraryContents? = nil) throws -> LibraryContents {
         try Task.checkCancellation()
         var checkedDirectories = Set<String>()
@@ -99,7 +101,7 @@ nonisolated struct LibraryReader: Sendable {
            cached.snapshot.revision == index.libraryRevision, cached.snapshot.cacheGeneration == index.cacheGeneration {
             return cached
         }
-        let snapshot = try snapshot(index: index, resolvingFiles: true, checkedDirectories: &checkedDirectories)
+        let snapshot = try snapshot(index: index, resolvingFiles: false, checkedDirectories: &checkedDirectories)
         return LibraryContents(reader: self, snapshot: snapshot)
     }
 
@@ -170,8 +172,8 @@ nonisolated struct LibraryReader: Sendable {
 }
 
 /// Each process keeps its own read-only cache for asynchronous refreshes.
-/// The keyboard can supply its validated first-presentation read to avoid a
-/// second full file walk when the index still describes the same publication.
+/// The app and keyboard supply their initial metadata read to avoid reading
+/// manifests again when the index still describes the same publication.
 actor LibrarySnapshotLoader {
     static let shared = LibrarySnapshotLoader()
     private var cached: LibraryContents?

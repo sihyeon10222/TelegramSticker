@@ -4,6 +4,7 @@ final class StickerCell: UICollectionViewCell {
     static let reuseID = "StickerCell"
     private let imageView = GIFPlaybackView()
     private var playbackURL: URL?
+    var hasDisplayedImage: Bool { imageView.image != nil }
     var imageTask: Task<Void, Never>?
     private(set) var imageToken = UUID()
     private let animationBadge = UILabel()
@@ -51,9 +52,9 @@ final class StickerCell: UICollectionViewCell {
         setCopied(copied)
         playbackURL = sticker.playbackURL
         imageView.configure(url: playbackURL, poster: image)
-        animationBadge.isHidden = sticker.animationURL == nil
+        animationBadge.isHidden = !sticker.isAnimated
         accessibilityLabel = "\(sticker.detail), \(sticker.name)"
-        accessibilityHint = sticker.animationURL == nil ? "탭하면 PNG 이미지를 복사합니다." : "탭하면 GIF를 복사합니다. 길게 눌러 정적 PNG를 선택할 수 있습니다."
+        accessibilityHint = !sticker.isAnimated ? "탭하면 PNG 이미지를 복사합니다." : "탭하면 GIF를 복사합니다. 길게 눌러 정적 PNG를 선택할 수 있습니다."
         accessibilityIdentifier = "keyboardSticker.\(sticker.id)"
     }
 

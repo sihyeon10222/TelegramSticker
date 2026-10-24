@@ -2,6 +2,8 @@ import Foundation
 
 /// A historical observation, not a live permission query from the containing app.
 nonisolated enum KeyboardAccessReceipt {
+    private static let observationQueue = DispatchQueue(
+        label: "com.sihyeon.TelegramSticker.keyboardAccess", qos: .utility)
     static var url: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: LibraryReader.appGroup)?
             .appendingPathComponent("keyboard-access-observed.json")
@@ -10,6 +12,18 @@ nonisolated enum KeyboardAccessReceipt {
     static let deniedNotification = "com.sihyeon.TelegramSticker.keyboardAccess.denied"
     private static let observationKey = "keyboardFullAccessObservedAt"
     private static let deniedKey = "keyboardFullAccessDeniedAt"
+
+    /// Receipt/defaults synchronization must not delay the keyboard's first frame.
+    /// Serialize observations so rapid permission changes keep notification order.
+    static func publishObservation(allowed: Bool) {
+        observationQueue.async {
+            if allowed { recordAllowed() }
+            let event = allowed ? allowedNotification : deniedNotification
+            CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                CFNotificationName(rawValue: event as CFString), nil, nil, true)
+        }
+    }
+
     static var lastDenied: Date? {
         let defaults = UserDefaults(suiteName: LibraryReader.appGroup)
         defaults?.synchronize()

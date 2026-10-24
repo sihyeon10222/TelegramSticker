@@ -57,7 +57,7 @@ nonisolated struct LibrarySnapshot: Sendable {
     var references: [PackReference] = []
 }
 
-/// Validated file descriptors, prepared away from UIKit/SwiftUI presentation.
+/// Validated manifest metadata. Asset paths are resolved by Sticker on access.
 nonisolated struct LibraryContents: Sendable {
     let reader: LibraryReader
     let snapshot: LibrarySnapshot
@@ -73,18 +73,17 @@ nonisolated struct LibraryContents: Sendable {
         var byID: [String: Sticker] = [:]
         var covers: [String: Sticker] = [:]
         for pack in snapshot.packs {
-            let items = pack.stickers.compactMap { record -> Sticker? in
-                guard let png = snapshot.files[record.pngPath], let thumbnail = snapshot.files[record.thumbnailPath] else { return nil }
-                return Sticker(id: pack.id + "." + record.id, name: record.name, detail: pack.title,
-                    imageURL: png, thumbnailURL: thumbnail,
-                    animationURL: record.animationPath.flatMap { snapshot.files[$0] },
-                    playbackURL: record.playbackPath.flatMap { snapshot.files[$0] })
+            let items = pack.stickers.map { record in
+                Sticker(id: pack.id + "." + record.id, name: record.name, detail: pack.title,
+                    reader: reader, imagePath: record.pngPath, thumbnailPath: record.thumbnailPath,
+                    animationPath: record.animationPath, playbackPath: record.playbackPath)
             }
             stickers[pack.id] = items
             for item in items { byID[item.id] = item }
-            if let first = items.first {
+            if let first = pack.stickers.first {
                 covers[pack.id] = Sticker(id: pack.id + "." + pack.revision, name: pack.title, detail: "",
-                    thumbnailURL: first.thumbnailURL, animationURL: first.playbackURL ?? first.animationURL)
+                    reader: reader, thumbnailPath: first.thumbnailPath,
+                    animationPath: first.playbackPath ?? first.animationPath)
             }
         }
         self.stickers = stickers

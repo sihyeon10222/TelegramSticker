@@ -5,12 +5,8 @@ extension KeyboardViewController {
     func refreshPermission(resetStatus: Bool = false) {
         let allowed = hasFullAccess
         guard resetStatus || previousFullAccess != allowed else { return }
-        // Receipt publication reads shared defaults synchronously. Observe once
-        // per appearance/access change, never on every host layout pass.
-        if allowed { KeyboardAccessReceipt.recordAllowed() }
-        let event = allowed ? KeyboardAccessReceipt.allowedNotification : KeyboardAccessReceipt.deniedNotification
-        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(rawValue: event as CFString), nil, nil, true)
+        // UI permission state is immediate; historical receipt I/O runs off-main.
+        KeyboardAccessReceipt.publishObservation(allowed: allowed)
         previousFullAccess = allowed
         resetStatusTask?.cancel()
         state.clearCopiedSticker()
