@@ -57,8 +57,7 @@ final class StickerImages {
         guard !Task.isCancelled else { return nil }
         let pixels = pixels ?? maximumPixelSize
         if let image = cachedThumbnail(for: sticker, pixels: pixels) { return image }
-        guard let url = sticker.thumbnailURL ?? sticker.fileURL() else { return nil }
-        let image = await StickerThumbnailDecoder.shared.image(url: url, pixels: pixels)
+        let image = await StickerThumbnailDecoder.shared.image(for: sticker, pixels: pixels)
         guard !Task.isCancelled, let image else { return nil }
         let thumbnail = UIImage(cgImage: image)
         Self.cache.setObject(thumbnail, forKey: key(for: sticker, pixels: pixels), cost: image.bytesPerRow * image.height)

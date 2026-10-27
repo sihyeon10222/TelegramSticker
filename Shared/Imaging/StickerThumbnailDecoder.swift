@@ -6,6 +6,19 @@ actor StickerThumbnailDecoder {
     static let shared = StickerThumbnailDecoder()
     private let cache = NSCache<NSString, CGImage>()
     init() { cache.totalCostLimit = 8 * 1024 * 1024 }
+    /// Resolve installed paths on this actor, before looking in the decode cache.
+    /// Keep the existing per-access traversal/symlink checks; never cache URLs.
+    func image(for sticker: Sticker, pixels: Int) -> CGImage? {
+        guard !Task.isCancelled,
+              let url = sticker.thumbnailURL ?? sticker.fileURL() else { return nil }
+        return image(url: url, pixels: pixels)
+    }
+
+    func playbackURL(for sticker: Sticker) -> URL? {
+        guard !Task.isCancelled else { return nil }
+        return sticker.playbackURL
+    }
+
     func image(url: URL, pixels: Int) -> CGImage? {
         guard !Task.isCancelled else { return nil }
         let key = "\(url.path):\(pixels)" as NSString

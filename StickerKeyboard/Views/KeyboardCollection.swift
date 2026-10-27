@@ -50,6 +50,7 @@ extension KeyboardViewController {
             guard let sticker = sticker(at: indexPath, in: collectionView) else { return cell }
             stickerCell.configure(sticker: sticker, image: images.cachedThumbnail(for: sticker), copied: collectionView === self.collectionView && sticker.id == state.lastCopiedID)
             stickerCell.setPlaybackPaused(playbackSuspended)
+            loadPlayback(for: sticker, in: stickerCell)
             let token = stickerCell.imageToken
             stickerCell.imageTask = Task { @MainActor [weak self, weak stickerCell] in
                 guard let self else { return }
@@ -66,11 +67,33 @@ extension KeyboardViewController {
         // Scrolling and interactive paging must not freeze visible animations.
         // GIFPlaybackView skips clipped/hidden views; ended cells stop their decoders.
         for grid in [collectionView, pagingPreview] {
-            grid.visibleCells.compactMap { $0 as? StickerCell }.forEach { $0.setPlaybackPaused(playbackSuspended) }
+            for cell in grid.visibleCells.compactMap({ $0 as? StickerCell }) {
+                cell.setPlaybackPaused(playbackSuspended)
+                if playbackSuspended {
+                    cell.playbackTask?.cancel(); cell.playbackTask = nil
+                } else if let path = grid.indexPath(for: cell), let sticker = sticker(at: path, in: grid) {
+                    loadPlayback(for: sticker, in: cell)
+                }
+            }
         }
     }
+    func loadPlayback(for sticker: Sticker, in cell: StickerCell) {
+        guard !playbackSuspended, cell.playbackTask == nil else { return }
+        let token = cell.imageToken
+        // Separate from imageTask: synchronous first-poster preparation cancels
+        // thumbnail work, but must not cancel the pending GIF URL resolution.
+        cell.playbackTask = Task { @MainActor [weak cell] in
+            let url = await StickerThumbnailDecoder.shared.playbackURL(for: sticker)
+            guard let cell, !Task.isCancelled, cell.imageToken == token else { return }
+            cell.setPlaybackURL(url)
+        }
+    }
+
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         (cell as? StickerCell)?.resumePlayback()
+        if let cell = cell as? StickerCell, let sticker = sticker(at: indexPath, in: collectionView) {
+            loadPlayback(for: sticker, in: cell)
+        }
         if let cell = cell as? StickerCell { recordFirstPoster(in: cell) }
         if let cell = cell as? StickerCell, cell.imageTask == nil, let sticker = sticker(at: indexPath, in: collectionView) {
             let token = cell.imageToken

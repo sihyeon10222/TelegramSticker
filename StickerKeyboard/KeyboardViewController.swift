@@ -1,11 +1,13 @@
 import UIKit
 import os
+import Darwin
 
 final class KeyboardViewController: UIInputViewController,
                                     UICollectionViewDataSource,
                                     UICollectionViewDelegate, UIGestureRecognizerDelegate {
     let state = KeyboardState()
     let performance = OSSignposter(subsystem: "com.sihyeon.TelegramSticker.StickerKeyboard", category: "PointsOfInterest")
+    private static var recordedProcessLaunch = false
     var displayedCacheGeneration: String?
     var displayedTabsRevision = -1
     var displayedSelectionRevision = -1
@@ -63,10 +65,11 @@ final class KeyboardViewController: UIInputViewController,
     var keyboardHeight: NSLayoutConstraint?
 
     override func loadView() {
+        recordProcessLaunch()
         beginPresentationPreparation()
         let requestedHeight = preferredKeyboardHeight
         let keyboard = UIInputView(
-            frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: requestedHeight),
+            frame: CGRect(x: 0, y: 0, width: 0, height: requestedHeight),
             inputViewStyle: .keyboard
         )
         keyboard.allowsSelfSizing = true
@@ -79,6 +82,45 @@ final class KeyboardViewController: UIInputViewController,
         height.isActive = true
         keyboardHeight = height
         inputView = keyboard
+    }
+
+    private func recordProcessLaunch() {
+        // UIKit confines this controller to the main actor. A new controller in
+        // an existing extension process must not produce another cold-start sample.
+        guard !Self.recordedProcessLaunch else { return }
+        Self.recordedProcessLaunch = true
+        let loadViewDate = Date()
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        let result = mib.withUnsafeMutableBufferPointer { buffer in
+            sysctl(buffer.baseAddress, UInt32(buffer.count), &info, &size, nil, 0)
+        }
+        guard result == 0 else {
+            let errorCode = errno
+            performance.emitEvent("Launch To loadView Unavailable", "errno=\(errorCode, privacy: .public)")
+            return
+        }
+        guard size == MemoryLayout<kinfo_proc>.stride else {
+            performance.emitEvent("Launch To loadView Unavailable", "reason=incompleteProcessInfo")
+            return
+        }
+        let start = info.kp_proc.p_un.__p_starttime
+        guard start.tv_sec > 0, (0..<1_000_000).contains(start.tv_usec) else {
+            performance.emitEvent("Launch To loadView Unavailable", "reason=invalidStartTime")
+            return
+        }
+        let processStartDate = Date(timeIntervalSince1970:
+            TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1_000_000)
+        let milliseconds = loadViewDate.timeIntervalSince(processStartDate) * 1_000
+        guard milliseconds.isFinite, milliseconds >= 0 else {
+            performance.emitEvent("Launch To loadView Unavailable", "reason=invalidElapsedTime")
+            return
+        }
+        // This is process age at first loadView, including any scheduling or
+        // prewarming delay; it is not a measurement of dyld work alone. Capture
+        // the endpoint before sysctl so querying does not inflate this sample.
+        performance.emitEvent("Launch To loadView", "\(milliseconds, privacy: .public) ms")
     }
 
     override func viewDidLoad() {
@@ -403,8 +445,9 @@ final class KeyboardViewController: UIInputViewController,
         // Initial traits and the host's provisional keyboard width can describe
         // the previous keyboard. Neither should select a temporary smaller size.
         let screenSize = viewIfLoaded?.window?.windowScene?.screen.bounds.size
-            ?? UIScreen.main.bounds.size
-        let orientation = viewIfLoaded?.window?.windowScene?.interfaceOrientation
+            ?? viewIfLoaded?.bounds.size
+            ?? .zero
+        let orientation = viewIfLoaded?.window?.windowScene?.effectiveGeometry.interfaceOrientation
         let landscape = orientation.map { $0 == .unknown
             ? screenSize.width > screenSize.height : $0.isLandscape }
             ?? (screenSize.width > screenSize.height)

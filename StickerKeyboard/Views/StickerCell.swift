@@ -4,8 +4,10 @@ final class StickerCell: UICollectionViewCell {
     static let reuseID = "StickerCell"
     private let imageView = GIFPlaybackView()
     private var playbackURL: URL?
+    private var configuredSticker: Sticker?
     var hasDisplayedImage: Bool { imageView.image != nil }
     var imageTask: Task<Void, Never>?
+    var playbackTask: Task<Void, Never>?
     private(set) var imageToken = UUID()
     private let animationBadge = UILabel()
     private let copiedBadge = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
@@ -48,9 +50,13 @@ final class StickerCell: UICollectionViewCell {
 
     func configure(sticker: Sticker, image: UIImage?, copied: Bool) {
         imageTask?.cancel(); imageTask = nil
+        playbackTask?.cancel(); playbackTask = nil
         imageToken = UUID()
         setCopied(copied)
-        playbackURL = sticker.playbackURL
+        // Preserve a running frame only for the exact same file references.
+        // The controller resolves/revalidates playback off-main for this token.
+        if configuredSticker != sticker { playbackURL = nil }
+        configuredSticker = sticker
         imageView.configure(url: playbackURL, poster: image)
         animationBadge.isHidden = !sticker.isAnimated
         accessibilityLabel = "\(sticker.detail), \(sticker.name)"
@@ -59,8 +65,16 @@ final class StickerCell: UICollectionViewCell {
     }
 
     func setPoster(_ image: UIImage?) { imageView.setPoster(image) }
+    func setPlaybackURL(_ url: URL?) {
+        playbackURL = url
+        imageView.configure(url: url, poster: imageView.image)
+    }
     func setPlaybackPaused(_ value: Bool) { imageView.playbackPaused = value }
-    func stopPlayback() { imageTask?.cancel(); imageTask = nil; imageView.stop() }
+    func stopPlayback() {
+        imageTask?.cancel(); imageTask = nil
+        playbackTask?.cancel(); playbackTask = nil
+        imageView.stop()
+    }
     func resumePlayback() { imageView.configure(url: playbackURL, poster: imageView.image) }
 
     func setCopied(_ copied: Bool) {
@@ -71,7 +85,9 @@ final class StickerCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         imageTask?.cancel(); imageTask = nil
+        playbackTask?.cancel(); playbackTask = nil
         imageToken = UUID()
+        configuredSticker = nil
         playbackURL = nil
         imageView.stop(); imageView.image = nil
     }
